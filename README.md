@@ -2,7 +2,9 @@
 
 A Stremio-style streaming app for Linux that uses **Torrentio + Real-Debrid** and automatically picks the best stream **at each available resolution**, **only in your native language**.
 
-It runs as a local app: a small Node server on `127.0.0.1:7878` plus a browser UI. Playback opens in **mpv** or **VLC** if installed (recommended), or inside the window via the browser's player.
+It runs as a desktop app: a small Node server on `127.0.0.1:7878` shown in its own app window (Chromium/Chrome/Brave/Edge `--app` mode; falls back to your default browser). Closing the window quits the app.
+
+**Install ffmpeg** (`sudo apt install ffmpeg`) for the best experience: it lets StreamSnap check each file's real audio tracks, play the track in your language, and convert audio/video formats browsers can't play (AC3/DTS audio, HEVC video) on the fly.
 
 ## Run
 
@@ -18,6 +20,9 @@ Open Settings and enter your Real-Debrid API key (https://real-debrid.com/apitok
 - Per-resolution auto-selection (4K / 1080p / 720p / 480p), with alternatives per resolution
 - Native-language filter: Torrentio language flags, release-name fallback, optional multi/dual-audio, English untagged handling
 - Only Real-Debrid-cached streams by default (instant start); CAM/screener releases dropped; HDR policy; oversized-file penalty
+- Built-in player: switch quality mid-playback (swaps the underlying stream and keeps your position), captions off by default with a CC menu, a "Next episode" button in the last minute or so, and an episode/season sidebar
+- Optional external playback in mpv or VLC
+- Audio verification: with ffmpeg installed, candidates whose audio tracks are all in another language are dropped
 - Subtitles in your language (OpenSubtitles addon), library, continue-watching with resume, watched marks
 - Keys stay on the server and in `~/.config/streamsnap/config.json` (mode 0600); the browser never sees them
 

@@ -69,3 +69,13 @@ test('buildBase', () => {
   assert.equal(buildBase(cfg({ torrentioUrl: 'https://t.example/sort=size|realdebrid=Z/manifest.json' })), 'https://t.example/sort=size|realdebrid=Z');
   assert.equal(buildBase(cfg({ torrentioUrl: 'https://t.example', realDebridKey: 'K' })), 'https://t.example/realdebrid=K');
 });
+
+test('multi-audio that lists other languages is rejected; script in filename counts as a language', () => {
+  const mk = (title) => parseStream({ name: 'T\n[RD+] 1080p', url: 'http://x/' + title.length, title });
+  const ru = mk('Movie.2020.1080p\n👤 5 💾 4 GB ⚙️ X\n🇷🇺 / 🇺🇦 Multi Audio');
+  const cy = mk('Фильм.2020.1080p.WEB-DL\n👤 5 💾 4 GB ⚙️ X');
+  const ok = mk('Movie.2020.1080p\n👤 5 💾 4 GB ⚙️ X\n🇬🇧 / 🇫🇷 Multi Audio');
+  const { picks } = selectStreams([ru, cy, ok], cfg());
+  assert.equal(picks.length, 1);
+  assert.deepEqual([picks[0].stream, ...picks[0].alternatives].map((s) => s.filename), [ok.filename]);
+});

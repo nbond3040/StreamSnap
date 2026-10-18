@@ -14,14 +14,14 @@ function which(bin) {
 }
 
 function available() {
-  return { mpv: !!which('mpv'), vlc: !!which('vlc') };
+  return { mpv: !!which('mpv'), vlc: !!which('vlc'), ffmpeg: !!which('ffmpeg'), ffprobe: !!which('ffprobe') };
 }
 
 function pickPlayer(pref) {
   const a = available();
-  if (pref === 'browser') return 'browser';
+  if (pref === 'browser' || !pref) return 'browser';
   if (pref === 'mpv' || pref === 'vlc') return a[pref] ? pref : (a.mpv ? 'mpv' : a.vlc ? 'vlc' : 'browser');
-  return a.mpv ? 'mpv' : a.vlc ? 'vlc' : 'browser';
+  return a.mpv ? 'mpv' : a.vlc ? 'vlc' : 'browser'; // pref === 'auto'
 }
 
 /**
@@ -34,6 +34,7 @@ function launch(player, { url, title, subs = [], start = 0, onProgress }) {
     const args = ['--force-media-title=' + title, '--input-ipc-server=' + sock, '--save-position-on-quit=no'];
     if (start > 0) args.push('--start=' + Math.floor(start));
     subs.forEach((s) => args.push('--sub-file=' + s));
+    if (subs.length) args.push('--sid=no'); // captions off by default; toggle with `v` in mpv
     args.push('--', url);
     const child = spawn(which('mpv') || 'mpv', args, { stdio: 'ignore' });
     if (onProgress) watchMpv(sock, child, onProgress);
@@ -44,6 +45,7 @@ function launch(player, { url, title, subs = [], start = 0, onProgress }) {
     const args = ['--meta-title=' + title];
     if (start > 0) args.push('--start-time=' + Math.floor(start));
     subs.forEach((s) => args.push('--sub-file=' + s));
+    if (subs.length) args.push('--sub-track=-1'); // captions off by default
     args.push(url);
     const child = spawn(which('vlc') || 'vlc', args, { stdio: 'ignore', detached: true });
     child.on('error', () => {});
@@ -84,4 +86,4 @@ function watchMpv(sock, child, onProgress) {
   });
 }
 
-module.exports = { available, pickPlayer, launch };
+module.exports = { available, pickPlayer, launch, which };

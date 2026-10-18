@@ -1,5 +1,8 @@
 'use strict';
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { LANGS } = require('./language');
 
 const BASE = process.env.STREAMSNAP_SUBS_URL || 'https://opensubtitles-v3.strem.io';
@@ -28,7 +31,7 @@ function srtToVtt(srt) {
   return `WEBVTT\n\n${body}`;
 }
 
-async function fetchVtt(ref) {
+async function fetchText(ref) {
   const url = refs.get(ref);
   if (!url) throw new Error('unknown subtitle');
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
@@ -36,7 +39,18 @@ async function fetchVtt(ref) {
   const buf = Buffer.from(await res.arrayBuffer());
   let text = buf.toString('utf8');
   if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
-  return srtToVtt(text);
+  return text;
 }
 
-module.exports = { listSubtitles, fetchVtt, srtToVtt, subtitleUrl: (ref) => refs.get(ref) };
+const fetchVtt = async (ref) => srtToVtt(await fetchText(ref));
+
+/** External players need a local file: VLC treats --sub-file values as paths, not URLs. */
+async function fetchToFile(ref) {
+  const dir = path.join(os.tmpdir(), 'streamsnap-subs');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${ref}.srt`);
+  fs.writeFileSync(file, await fetchText(ref));
+  return file;
+}
+
+module.exports = { listSubtitles, fetchVtt, fetchToFile, srtToVtt };

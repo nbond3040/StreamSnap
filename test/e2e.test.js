@@ -54,11 +54,10 @@ test('end to end against mock Torrentio/Cinemeta', async (t) => {
   const vid = await fetch(`${base}/api/stream/${ref}`);
   assert.equal(await vid.text(), 'VIDEODATA'); // followed Torrentio's 302 through the proxy
 
-  const play = await (await post('/api/play', { ref, key: 'movie:tt0000001', title: 'Mock' })).json();
-  assert.equal(play.player, 'browser');
   await post('/api/progress', { key: 'movie:tt0000001', pos: 100, dur: 1000, meta: { type: 'movie', id: 'tt0000001', name: 'Mock' } });
   const lib = await (await fetch(base + '/api/library')).json();
   assert.equal(lib.continueWatching.length, 1);
+  assert.deepEqual(await (await fetch(base + '/api/resume?key=movie:tt0000001')).json(), { pos: 100 });
 
   // security: bad Host and cross-origin POST are rejected
   const evil = await fetch(base + '/api/config', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: '{}' });

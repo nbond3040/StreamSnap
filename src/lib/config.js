@@ -20,9 +20,11 @@ const DEFAULTS = {
   nativeLanguage: systemLanguage(),
   includeMultiAudio: true,     // accept releases tagged multi/dual audio
   assumeUntaggedNative: true,  // English only: untagged Torrentio releases are English
+  verifyAudio: true,           // inspect the real audio tracks with ffprobe/ffmpeg (needs ffmpeg installed)
   allowUncached: false,        // only Real-Debrid-cached streams play instantly
   hdrPolicy: 'allow',          // allow | avoid | only
-  player: 'auto',              // auto | mpv | vlc | browser
+  player: 'browser',           // browser (in-app player) | mpv | vlc
+  preferredResolution: '1080p',// quality the Play button starts with
   resolutions: ['2160p', '1080p', '720p', '480p'],
   subtitles: true,
 };

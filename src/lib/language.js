@@ -4,7 +4,7 @@
 const LANGS = {
   en: { name: 'English', iso3: 'eng', flags: ['🇬🇧', '🇺🇸'], tokens: ['english'] },
   es: { name: 'Spanish', iso3: 'spa', flags: ['🇪🇸', '🇲🇽'], tokens: ['spanish', 'castellano', 'latino'] },
-  fr: { name: 'French', iso3: 'fre', flags: ['🇫🇷'], tokens: ['french', 'truefrench', 'vff', 'vfq'] },
+  fr: { name: 'French', iso3: 'fre', flags: ['🇫🇷'], tokens: ['french', 'truefrench', 'vff', 'vfq', 'vfi', 'vf2', 'vostfr'] },
   de: { name: 'German', iso3: 'ger', flags: ['🇩🇪'], tokens: ['german', 'deutsch'] },
   it: { name: 'Italian', iso3: 'ita', flags: ['🇮🇹'], tokens: ['italian', 'ita'] },
   pt: { name: 'Portuguese', iso3: 'por', flags: ['🇵🇹', '🇧🇷'], tokens: ['portuguese', 'dublado'] },
@@ -51,6 +51,7 @@ function detectLanguages(stream) {
   const multi = MULTI_RE.test(stream.languageLine);
   if (!codes.size && !multi) {
     // No tag from Torrentio: fall back to words in the release name.
+    for (const [code, re] of SCRIPTS) if (re.test(stream.filename)) codes.add(code);
     const name = stream.filename.toLowerCase();
     for (const [code, l] of Object.entries(LANGS)) {
       if (code === 'en') continue;
@@ -65,9 +66,25 @@ function matchesNative(stream, cfg) {
   const native = cfg.nativeLanguage;
   const d = detectLanguages(stream);
   if (d.codes.has(native)) return { ok: true, reason: 'tagged' };
-  if (d.multi && cfg.includeMultiAudio) return { ok: true, reason: 'multi' };
+  // "Multi" only counts if Torrentio didn't list languages, or listed ours. Multi = Russian+Ukrainian is not ours.
+  if (d.multi && cfg.includeMultiAudio && d.codes.size === 0) return { ok: true, reason: 'multi' };
   if (!d.tagged && native === 'en' && cfg.assumeUntaggedNative) return { ok: true, reason: 'untagged' };
   return { ok: false, reason: 'language' };
 }
 
-module.exports = { LANGS, detectLanguages, matchesNative };
+// Unicode scripts that give a release away even when Torrentio printed no flag.
+const SCRIPTS = [
+  ['ru', /[\u0400-\u04FF]/], ['ja', /[\u3040-\u30FF]/], ['ko', /[\uAC00-\uD7AF]/], ['zh', /[\u4E00-\u9FFF]/],
+  ['ar', /[\u0600-\u06FF]/], ['he', /[\u0590-\u05FF]/], ['th', /[\u0E00-\u0E7F]/], ['hi', /[\u0900-\u097F]/], ['el', /[\u0370-\u03FF]/],
+];
+
+// ffprobe language tags (ISO 639-2/B, 639-2/T and 639-1) per language.
+const TAG_ALIASES = { fr: ['fra'], de: ['deu'], zh: ['zho', 'cmn', 'yue'], cs: ['ces'], nl: ['nld'], ro: ['ron'], el: ['gre'], no: ['nob', 'nno'], es: ['lat'], pt: ['por'] };
+function tagMatches(code, tag) {
+  tag = String(tag || '').toLowerCase().split(/[-_]/)[0];
+  const l = LANGS[code];
+  return !!l && (tag === code || tag === l.iso3 || (TAG_ALIASES[code] || []).includes(tag));
+}
+const isUnknownTag = (tag) => !tag || /^(und|mis|mul|zxx)$/i.test(tag);
+
+module.exports = { LANGS, detectLanguages, matchesNative, tagMatches, isUnknownTag };
