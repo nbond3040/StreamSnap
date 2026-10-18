@@ -36,20 +36,28 @@ const retryBox = (e, retry) => h('div', { class: 'err retry' }, h('span', {}, (e
 const settled = (results, i) => (results[i].status === 'fulfilled' ? { value: results[i].value } : { error: results[i].reason });
 const libraryIds = new Set(); // titles in the user's library, so cover art can offer "+" only where it makes sense
 
-const THEMES = {
-  midnight: { name: 'Midnight', bg: '#0b0b10', bar: '#1b1b26', accent: '#7c5cff' },
-  graphite: { name: 'Graphite', bg: '#131316', bar: '#242429', accent: '#6c8cff' },
-  amoled: { name: 'AMOLED', bg: '#000000', bar: '#15151a', accent: '#8b6cff' },
-  ocean: { name: 'Ocean', bg: '#08121c', bar: '#152a3f', accent: '#2ea0ff' },
-  forest: { name: 'Forest', bg: '#0b130e', bar: '#1a2b20', accent: '#2fbf75' },
-  rose: { name: 'Rose', bg: '#150b12', bar: '#2d1a27', accent: '#ff5c93' },
-  light: { name: 'Light', bg: '#f4f4f9', bar: '#dedeea', accent: '#6a4cf0' },
+// Colour palettes (swatch previews mirror the :root[data-color] rules in style.css). Any colour works in dark or light.
+const COLORS = {
+  violet: { name: 'Violet', h: 240, sat: 18, ah: 252 },
+  blue: { name: 'Blue', h: 222, sat: 24, ah: 216 },
+  ocean: { name: 'Ocean', h: 196, sat: 26, ah: 194 },
+  green: { name: 'Green', h: 150, sat: 20, ah: 148 },
+  orange: { name: 'Orange', h: 24, sat: 22, ah: 24 },
+  rose: { name: 'Rose', h: 336, sat: 22, ah: 338 },
+  graphite: { name: 'Graphite', h: 240, sat: 4, ah: 222 },
 };
-function applyTheme(id) {
-  if (!THEMES[id]) id = 'midnight';
-  document.documentElement.dataset.theme = id;
-  try { localStorage.setItem('ss.theme', id); } catch { /* optional */ }
+let appearance = { color: 'violet', mode: 'dark', black: false };
+const lightQuery = matchMedia('(prefers-color-scheme: light)');
+function applyAppearance(next) {
+  appearance = { ...appearance, ...next };
+  if (!COLORS[appearance.color]) appearance.color = 'violet';
+  const d = document.documentElement.dataset;
+  d.color = appearance.color;
+  d.black = appearance.black ? '1' : '0';
+  d.mode = appearance.mode === 'system' ? (lightQuery.matches ? 'light' : 'dark') : appearance.mode === 'light' ? 'light' : 'dark';
+  try { localStorage.setItem('ss.appearance', JSON.stringify(appearance)); } catch { /* optional */ }
 }
+lightQuery.addEventListener('change', () => { if (appearance.mode === 'system') applyAppearance({}); });
 
 const resLabel = (r) => (r === '2160p' ? '4K' : r);
 const RES_ORDER = ['2160p', '1440p', '1080p', '720p', '576p', '480p', '360p'];
@@ -115,8 +123,16 @@ async function home() {
     [...list.children].forEach((el, i) => { el.dataset.id = lib.continueWatching[i].id; });
     out.push(...section('Continue watching', list));
   }
-  const row = (title, r, items) => section(title, r.status === 'fulfilled' ? scroller(items) : retryBox(r.reason, () => home()));
-  out.push(...row('Popular movies', moviesR, movies), ...row('Popular series', seriesR, series));
+  const moreTile = (type) => {
+    const t = h('a', { class: 'card more', href: `#/discover/${type}` }, h('span', { 'data-icon': 'arrowRight' }), 'Load more');
+    setIcon(t.firstChild, 'arrowRight'); return t;
+  };
+  const row = (title, r, items, type) => {
+    if (r.status !== 'fulfilled') return section(title, retryBox(r.reason, () => home()));
+    const list = scroller(items); list.append(moreTile(type));
+    return section(title, list);
+  };
+  out.push(...row('Popular movies', moviesR, movies, 'movie'), ...row('Popular series', seriesR, series, 'series'));
   view.replaceChildren(...out);
 }
 
@@ -332,7 +348,11 @@ async function detail(type, id) {
   };
 
   const metaLine = [meta.year || meta.releaseInfo, meta.runtime].filter(Boolean);
+  const backIcon = h('span', { style: 'display:inline-flex' });
+  setIcon(backIcon, 'back');
+  const backBtn = h('button', { class: 'btn ghost sm back', onclick: goBack }, backIcon, 'Back');
   const hero = h('div', { class: 'dhero', style: meta.background ? `background-image:url("${encodeURI(meta.background)}")` : '' },
+    h('div', { class: 'backbar' }, backBtn),
     h('div', { class: 'dwrap' },
       meta.poster && h('img', { class: 'poster', src: meta.poster, alt: '' }),
       h('div', { class: 'dinfo' }, h('h1', {}, meta.name),
@@ -397,15 +417,29 @@ async function settings() {
   const check = (name, label, hint) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name, checked: !!cfg[name] }), h('div', {}, h('div', {}, label), hint && h('small', { class: 'subtle' }, hint)));
   const select = (name, opts) => h('select', { name }, Object.entries(opts).map(([v, t]) => h('option', { value: v, selected: v === cfg[name] }, t)));
   const p = info.players;
-  const themeBtns = Object.entries(THEMES).map(([id, t]) => {
-    const b = h('button', { type: 'button', class: 'theme' + (document.documentElement.dataset.theme === id ? ' on' : ''), onclick: () => {
-      applyTheme(id); themeBtns.forEach((x) => x.classList.toggle('on', x === b));
-      api('/config', { theme: id }).catch((e) => toast(e.message));
-    } }, h('div', { class: 'sw', style: `background:${t.bg}` }, h('i', { style: `top:10px;background:${t.bar};` }), h('i', { style: `top:24px;right:30px;background:${t.bar};` }), h('b', { style: `background:${t.accent}` })), h('span', {}, t.name));
-    return b;
-  });
+  const save = (patch) => api('/config', patch).catch((e) => toast(e.message));
+  const modeSeg = h('div', { class: 'seg' });
+  const swatches = h('div', { class: 'themes' });
+  const blackBox = h('input', { type: 'checkbox', checked: appearance.black, onchange: () => { applyAppearance({ black: blackBox.checked }); save({ pureBlack: blackBox.checked }); drawAppearance(); } });
+  const blackRow = h('label', { class: 'check' }, blackBox, h('div', {}, h('div', {}, 'True black background'), h('small', { class: 'subtle' }, 'Dark mode only. Saves power on OLED screens.')));
+  function drawAppearance() {
+    const dark = document.documentElement.dataset.mode === 'dark';
+    modeSeg.replaceChildren(...[['dark', 'Dark'], ['light', 'Light'], ['system', 'System']].map(([m, label]) =>
+      h('button', { type: 'button', class: appearance.mode === m ? 'on' : '', onclick: () => { applyAppearance({ mode: m }); save({ themeMode: m }); drawAppearance(); } }, label)));
+    blackRow.hidden = !dark;
+    swatches.replaceChildren(...Object.entries(COLORS).map(([id, c]) => {
+      const bg = dark ? (appearance.black ? '#000' : `hsl(${c.h} ${c.sat}% 5.5%)`) : `hsl(${c.h} ${c.sat * 1.5}% 96%)`;
+      const bar = dark ? `hsl(${c.h} ${c.sat}% ${appearance.black ? 12 : 18.5}%)` : `hsl(${c.h} ${c.sat * 1.2}% 88%)`;
+      const accent = dark ? `hsl(${c.ah} 100% 68%)` : `hsl(${c.ah} 78% 54%)`;
+      return h('button', { type: 'button', class: 'theme' + (appearance.color === id ? ' on' : ''), onclick: () => { applyAppearance({ color: id }); save({ themeColor: id }); drawAppearance(); } },
+        h('span', { class: 'sw', style: `background:${bg}` }, h('i', { style: `top:10px;right:28px;background:${bar}` }), h('i', { style: `top:24px;right:50px;background:${bar}` }), h('b', { style: `background:${accent}` })), h('span', {}, c.name));
+    }));
+  }
+  drawAppearance();
   f.append(
-    h('div', { class: 'card2' }, h('h2', {}, 'Appearance'), h('div', { class: 'themes' }, themeBtns)),
+    h('div', { class: 'card2' }, h('h2', {}, 'Appearance'),
+      h('div', { class: 'row2' }, h('span', {}, 'Mode'), modeSeg), blackRow,
+      h('div', { class: 'field' }, h('span', {}, 'Color'), swatches)),
     h('div', { class: 'card2' }, h('h2', {}, 'Accounts'),
       field(`Real-Debrid API key${cfg.hasRealDebridKey ? ` — saved (ends ${cfg.realDebridKeyHint})` : ''}`, text('realDebridKey', 'password', cfg.hasRealDebridKey ? 'Leave blank to keep the saved key' : 'real-debrid.com/apitoken'), 'Stored only on this computer.'),
       field(`TMDB API key (optional)${cfg.hasTmdbKey ? ' — saved' : ''}`, text('tmdbKey', 'password', cfg.hasTmdbKey ? 'Leave blank to keep the saved key' : 'themoviedb.org/settings/api'),
@@ -436,10 +470,20 @@ async function settings() {
 }
 
 // ---------- router ----------
+// In-app history: lets the Back button return to the previous page and restore where you had scrolled to.
+const nav = { stack: [], scroll: new Map() };
+const goBack = () => (nav.stack.length > 1 ? history.back() : (location.hash = '#/'));
+
 async function route() {
-  const [, page, a, b] = location.hash.split('/');
+  const hash = location.hash || '#/';
+  const [, page, a, b] = hash.split('/');
+  const here = nav.stack[nav.stack.length - 1];
+  if (here !== undefined) nav.scroll.set(here, window.scrollY); // where the page we're leaving was scrolled to
+  let restore = 0;
+  if (here === hash) restore = window.scrollY;                                   // re-render of the same page (e.g. player closed)
+  else if (nav.stack[nav.stack.length - 2] === hash) { nav.stack.pop(); restore = nav.scroll.get(hash) || 0; } // going back
+  else nav.stack.push(hash);
   document.querySelectorAll('#top [data-nav]').forEach((n) => n.classList.toggle('on', n.dataset.nav === (page || 'home')));
-  window.scrollTo(0, 0);
   try {
     if (!page) await home();
     else if (page === 'discover') await discover(a === 'series' ? 'series' : 'movie');
@@ -448,6 +492,7 @@ async function route() {
     else if (page === 'detail') await detail(a, b);
     else if (page === 'settings') await settings();
   } catch (e) { view.replaceChildren(showErr(e)); }
+  window.scrollTo(0, restore);
 }
 window.onPlayerClosed = () => { if (/^#?\/?$|detail/.test(location.hash.replace('#', '')) || !location.hash) route(); };
 addEventListener('hashchange', route);
@@ -467,5 +512,5 @@ view.addEventListener('wheel', (e) => {
 Promise.allSettled([api('/info'), api('/library'), api('/config')]).then(([info, lib, cfg]) => {
   if (info.status === 'fulfilled') APPINFO = info.value;
   if (lib.status === 'fulfilled') lib.value.library.forEach((m) => libraryIds.add(m.id));
-  if (cfg.status === 'fulfilled' && cfg.value.theme) applyTheme(cfg.value.theme);
+  if (cfg.status === 'fulfilled') applyAppearance({ color: cfg.value.themeColor, mode: cfg.value.themeMode, black: cfg.value.pureBlack });
 }).finally(route);

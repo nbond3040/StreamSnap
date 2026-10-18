@@ -28,7 +28,9 @@ const DEFAULTS = {
   preferredResolution: '1080p',// quality the Play button starts with
   resolutions: ['2160p', '1080p', '720p', '480p'],
   subtitles: true,
-  theme: 'midnight',           // see THEMES in public/app.js
+  themeColor: 'violet',        // see COLORS in public/app.js
+  themeMode: 'dark',           // dark | light | system
+  pureBlack: false,            // true-black backgrounds in dark mode
 };
 
 function readJson(file, fallback) {
