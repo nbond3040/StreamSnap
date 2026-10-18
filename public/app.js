@@ -46,7 +46,7 @@ const COLORS = {
   rose: { name: 'Rose', h: 336, sat: 22, ah: 338 },
   graphite: { name: 'Graphite', h: 240, sat: 4, ah: 222 },
 };
-let appearance = { color: 'violet', mode: 'dark', black: false };
+let appearance = { color: 'violet', mode: 'dark', black: false, dd: 'floating' };
 const lightQuery = matchMedia('(prefers-color-scheme: light)');
 function applyAppearance(next) {
   appearance = { ...appearance, ...next };
@@ -54,6 +54,7 @@ function applyAppearance(next) {
   const d = document.documentElement.dataset;
   d.color = appearance.color;
   d.black = appearance.black ? '1' : '0';
+  d.dd = ['floating', 'compact', 'chips'].includes(appearance.dd) ? appearance.dd : 'floating';
   d.mode = appearance.mode === 'system' ? (lightQuery.matches ? 'light' : 'dark') : appearance.mode === 'light' ? 'light' : 'dark';
   try { localStorage.setItem('ss.appearance', JSON.stringify(appearance)); } catch { /* optional */ }
 }
@@ -420,12 +421,15 @@ async function settings() {
   const save = (patch) => api('/config', patch).catch((e) => toast(e.message));
   const modeSeg = h('div', { class: 'seg' });
   const swatches = h('div', { class: 'themes' });
+  const ddSeg = h('div', { class: 'seg' });
   const blackBox = h('input', { type: 'checkbox', checked: appearance.black, onchange: () => { applyAppearance({ black: blackBox.checked }); save({ pureBlack: blackBox.checked }); drawAppearance(); } });
   const blackRow = h('label', { class: 'check' }, blackBox, h('div', {}, h('div', {}, 'True black background'), h('small', { class: 'subtle' }, 'Dark mode only. Saves power on OLED screens.')));
   function drawAppearance() {
     const dark = document.documentElement.dataset.mode === 'dark';
     modeSeg.replaceChildren(...[['dark', 'Dark'], ['light', 'Light'], ['system', 'System']].map(([m, label]) =>
       h('button', { type: 'button', class: appearance.mode === m ? 'on' : '', onclick: () => { applyAppearance({ mode: m }); save({ themeMode: m }); drawAppearance(); } }, label)));
+    ddSeg.replaceChildren(...[['floating', 'Floating'], ['compact', 'Compact'], ['chips', 'Chips']].map(([v, label]) =>
+      h('button', { type: 'button', class: appearance.dd === v ? 'on' : '', onclick: () => { applyAppearance({ dd: v }); save({ dropdownStyle: v }); drawAppearance(); } }, label)));
     blackRow.hidden = !dark;
     swatches.replaceChildren(...Object.entries(COLORS).map(([id, c]) => {
       const bg = dark ? (appearance.black ? '#000' : `hsl(${c.h} ${c.sat}% 5.5%)`) : `hsl(${c.h} ${c.sat * 1.5}% 96%)`;
@@ -439,7 +443,8 @@ async function settings() {
   f.append(
     h('div', { class: 'card2' }, h('h2', {}, 'Appearance'),
       h('div', { class: 'row2' }, h('span', {}, 'Mode'), modeSeg), blackRow,
-      h('div', { class: 'field' }, h('span', {}, 'Color'), swatches)),
+      h('div', { class: 'field' }, h('span', {}, 'Color'), swatches),
+      h('div', { class: 'row2' }, h('span', {}, 'Dropdown style'), ddSeg)),
     h('div', { class: 'card2' }, h('h2', {}, 'Accounts'),
       field(`Real-Debrid API key${cfg.hasRealDebridKey ? ` — saved (ends ${cfg.realDebridKeyHint})` : ''}`, text('realDebridKey', 'password', cfg.hasRealDebridKey ? 'Leave blank to keep the saved key' : 'real-debrid.com/apitoken'), 'Stored only on this computer.'),
       field(`TMDB API key (optional)${cfg.hasTmdbKey ? ' — saved' : ''}`, text('tmdbKey', 'password', cfg.hasTmdbKey ? 'Leave blank to keep the saved key' : 'themoviedb.org/settings/api'),
@@ -512,5 +517,5 @@ view.addEventListener('wheel', (e) => {
 Promise.allSettled([api('/info'), api('/library'), api('/config')]).then(([info, lib, cfg]) => {
   if (info.status === 'fulfilled') APPINFO = info.value;
   if (lib.status === 'fulfilled') lib.value.library.forEach((m) => libraryIds.add(m.id));
-  if (cfg.status === 'fulfilled') applyAppearance({ color: cfg.value.themeColor, mode: cfg.value.themeMode, black: cfg.value.pureBlack });
+  if (cfg.status === 'fulfilled') applyAppearance({ color: cfg.value.themeColor, mode: cfg.value.themeMode, black: cfg.value.pureBlack, dd: cfg.value.dropdownStyle });
 }).finally(route);

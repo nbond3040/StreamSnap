@@ -139,7 +139,9 @@ details.alts summary { cursor:pointer; color:var(--dim); font-size:13px; user-se
 .check { display:flex; gap:10px; align-items:flex-start; } .check input { margin-top:4px; accent-color:var(--accent); width:16px; height:16px; }
 
 /* player */
-#player { position:fixed; inset:0; z-index:50; background:#000; color:#fff; user-select:none; }
+#player { position:fixed; inset:0; z-index:50; background:#000; color:#fff; user-select:none;
+  /* the player is always dark, whatever the app theme */
+  --fg:#f2f2f8; --s1:#13131b; --s2:#1b1b26; --s3:#262634; --line:#2a2a3a; --dim:#8c8ca6; --ghost:rgba(255,255,255,.1); }
 #player.idle { cursor:none; } #player.idle .p-top, #player.idle .p-bottom { opacity:0; pointer-events:none; }
 #video { position:absolute; inset:0; width:100%; height:100%; background:#000; }
 #video::cue { background:rgba(0,0,0,.75); color:#fff; font:600 clamp(18px,2.2vw,32px) system-ui; }
@@ -262,3 +264,47 @@ select option { background:var(--s2); color:var(--fg); }
 .dhero .backbar { position:relative; padding:0 0 18px; }
 
 .back .ico { width:16px; height:16px; }
+
+/* ---- themed dropdowns (dropdown.js) ---- */
+.dd { position:relative; display:inline-block; }
+.field .dd { display:block; }
+.dd-native { display:none !important; }
+.dd-btn { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; background:var(--s2); border:1px solid var(--line); color:var(--fg); border-radius:10px; padding:9px 14px 9px 14px; cursor:pointer; text-align:left; transition:border-color .15s, background .15s; }
+.dd-btn.pill { border-radius:999px; padding:9px 16px 9px 18px; }
+.dd-btn:hover { border-color:var(--dim); }
+.dd-btn:focus-visible, .dd.open .dd-btn { outline:0; border-color:var(--accent); }
+.dd-btn .dd-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dd-btn .chev { width:12px; height:8px; flex:none; color:var(--dim); transition:transform .15s; }
+.dd.open .chev { transform:rotate(180deg); color:var(--accent); }
+.dd-menu { position:absolute; top:calc(100% + 8px); left:0; min-width:100%; width:max-content; max-width:min(360px, 90vw); max-height:min(340px, 55vh); overflow:auto; z-index:60; animation:ddIn .14s ease-out; }
+.dd.up .dd-menu { top:auto; bottom:calc(100% + 8px); }
+.dd.right .dd-menu { left:auto; right:0; }
+@keyframes ddIn { from { opacity:0; transform:translateY(-4px) scale(.98); } }
+.dd-item { display:flex; align-items:center; justify-content:space-between; gap:18px; width:100%; background:none; border:0; color:var(--fg); text-align:left; cursor:pointer; }
+.dd-item .ico { width:16px; height:16px; flex:none; opacity:0; }
+.dd-item.on .ico { opacity:1; }
+.dd-item:focus-visible { outline:0; }
+
+/* style 1: floating card */
+:root[data-dd="floating"] .dd-menu { background:color-mix(in srgb, var(--s1) 94%, transparent); backdrop-filter:blur(16px); border:1px solid var(--line); border-radius:14px; padding:6px; box-shadow:0 18px 50px rgba(0,0,0,.4); }
+:root[data-dd="floating"] .dd-item { padding:9px 12px; border-radius:9px; font-size:14px; }
+:root[data-dd="floating"] .dd-item:hover, :root[data-dd="floating"] .dd-item:focus-visible { background:var(--s3); }
+:root[data-dd="floating"] .dd-item.on { color:var(--accent2); font-weight:600; }
+:root[data-mode="light"] .dd-item.on { color:var(--accent); }
+:root[data-mode="light"][data-dd="floating"] .dd-menu { box-shadow:0 18px 40px rgba(30,30,60,.18); }
+
+/* style 2: compact list, flat and tight with an accent bar */
+:root[data-dd="compact"] .dd-btn, :root[data-dd="compact"] .dd-btn.pill { border-radius:8px; padding:8px 12px; }
+:root[data-dd="compact"] .dd-menu { background:var(--s1); border:1px solid var(--line); border-radius:8px; padding:4px 0; box-shadow:0 8px 24px rgba(0,0,0,.3); top:calc(100% + 4px); }
+:root[data-dd="compact"] .dd-item { padding:7px 14px; font-size:13px; border-left:3px solid transparent; }
+:root[data-dd="compact"] .dd-item:hover, :root[data-dd="compact"] .dd-item:focus-visible { background:var(--s2); }
+:root[data-dd="compact"] .dd-item.on { border-left-color:var(--accent); background:var(--s2); font-weight:600; }
+:root[data-dd="compact"] .dd-item .ico { display:none; }
+
+/* style 3: chips, every option visible at once */
+:root[data-dd="chips"] .dd-menu { display:flex; flex-wrap:wrap; gap:6px; background:var(--s1); border:1px solid var(--line); border-radius:16px; padding:10px; width:max(100%, 300px); max-width:min(440px, 90vw); box-shadow:0 18px 50px rgba(0,0,0,.4); }
+:root[data-dd="chips"] .dd-item { width:auto; flex:none; padding:6px 14px; border-radius:999px; background:var(--s2); border:1px solid transparent; font-size:13px; }
+:root[data-dd="chips"] .dd-item:hover, :root[data-dd="chips"] .dd-item:focus-visible { border-color:var(--accent); }
+:root[data-dd="chips"] .dd-item.on { background:var(--accent); color:#fff; font-weight:600; }
+:root[data-dd="chips"] .dd-item .ico { display:none; }
+.dd-menu { font-weight:400; } .dd-item { font-weight:500; } .dd-btn { font-weight:500; }

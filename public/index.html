@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/icons/256.png">
 <script>try {
   var a = JSON.parse(localStorage.getItem("ss.appearance") || "{}"), d = document.documentElement.dataset;
-  d.color = a.color || "violet"; d.black = a.black ? "1" : "0";
+  d.color = a.color || "violet"; d.dd = a.dd || "floating"; d.black = a.black ? "1" : "0";
   d.mode = a.mode === "system" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : (a.mode || "dark");
 } catch (e) {}</script>
 <link rel="stylesheet" href="/style.css">
@@ -58,6 +58,7 @@
 </div>
 <div id="toast" hidden></div>
 <script src="/icons.js"></script>
+<script src="/dropdown.js"></script>
 <script src="/player.js"></script>
 <script src="/app.js"></script>
 </body>
