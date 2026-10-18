@@ -285,26 +285,13 @@ select option { background:var(--s2); color:var(--fg); }
 .dd-item.on .ico { opacity:1; }
 .dd-item:focus-visible { outline:0; }
 
-/* style 1: floating card */
-:root[data-dd="floating"] .dd-menu { background:color-mix(in srgb, var(--s1) 94%, transparent); backdrop-filter:blur(16px); border:1px solid var(--line); border-radius:14px; padding:6px; box-shadow:0 18px 50px rgba(0,0,0,.4); }
-:root[data-dd="floating"] .dd-item { padding:9px 12px; border-radius:9px; font-size:14px; }
-:root[data-dd="floating"] .dd-item:hover, :root[data-dd="floating"] .dd-item:focus-visible { background:var(--s3); }
-:root[data-dd="floating"] .dd-item.on { color:var(--accent2); font-weight:600; }
-:root[data-mode="light"] .dd-item.on { color:var(--accent); }
-:root[data-mode="light"][data-dd="floating"] .dd-menu { box-shadow:0 18px 40px rgba(30,30,60,.18); }
+/* compact list: flat and tight with an accent bar */
+.dd-btn, .dd-btn.pill { border-radius:8px; padding:8px 12px; }
+.dd-menu { background:var(--s1); border:1px solid var(--line); border-radius:8px; padding:4px 0; box-shadow:0 8px 24px rgba(0,0,0,.3); top:calc(100% + 4px); }
+.dd-item { padding:7px 14px; font-size:13px; border-left:3px solid transparent; }
+.dd-item:hover, .dd-item:focus-visible { background:var(--s2); }
+.dd-item.on { border-left-color:var(--accent); background:var(--s2); font-weight:600; }
+.dd-item .ico { display:none; }
 
-/* style 2: compact list, flat and tight with an accent bar */
-:root[data-dd="compact"] .dd-btn, :root[data-dd="compact"] .dd-btn.pill { border-radius:8px; padding:8px 12px; }
-:root[data-dd="compact"] .dd-menu { background:var(--s1); border:1px solid var(--line); border-radius:8px; padding:4px 0; box-shadow:0 8px 24px rgba(0,0,0,.3); top:calc(100% + 4px); }
-:root[data-dd="compact"] .dd-item { padding:7px 14px; font-size:13px; border-left:3px solid transparent; }
-:root[data-dd="compact"] .dd-item:hover, :root[data-dd="compact"] .dd-item:focus-visible { background:var(--s2); }
-:root[data-dd="compact"] .dd-item.on { border-left-color:var(--accent); background:var(--s2); font-weight:600; }
-:root[data-dd="compact"] .dd-item .ico { display:none; }
 
-/* style 3: chips, every option visible at once */
-:root[data-dd="chips"] .dd-menu { display:flex; flex-wrap:wrap; gap:6px; background:var(--s1); border:1px solid var(--line); border-radius:16px; padding:10px; width:max(100%, 300px); max-width:min(440px, 90vw); box-shadow:0 18px 50px rgba(0,0,0,.4); }
-:root[data-dd="chips"] .dd-item { width:auto; flex:none; padding:6px 14px; border-radius:999px; background:var(--s2); border:1px solid transparent; font-size:13px; }
-:root[data-dd="chips"] .dd-item:hover, :root[data-dd="chips"] .dd-item:focus-visible { border-color:var(--accent); }
-:root[data-dd="chips"] .dd-item.on { background:var(--accent); color:#fff; font-weight:600; }
-:root[data-dd="chips"] .dd-item .ico { display:none; }
 .dd-menu { font-weight:400; } .dd-item { font-weight:500; } .dd-btn { font-weight:500; }

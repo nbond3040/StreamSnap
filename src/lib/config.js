@@ -30,7 +30,6 @@ const DEFAULTS = {
   subtitles: true,
   themeColor: 'violet',        // see COLORS in public/app.js
   themeMode: 'dark',           // dark | light | system
-  dropdownStyle: 'floating',   // floating | compact | chips
   pureBlack: false,            // true-black backgrounds in dark mode
 };
 
