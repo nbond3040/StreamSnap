@@ -11,7 +11,7 @@ const subtitles = require('./lib/subtitles');
 const tmdb = require('./lib/tmdb');
 const player = require('./lib/player');
 const { selectStreams } = require('./lib/select');
-const { LANGS, tagMatches, isUnknownTag } = require('./lib/language');
+const { LANGS, tagMatches, isUnknownTag, detectLanguages } = require('./lib/language');
 
 const PUBLIC = path.join(__dirname, '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -44,7 +44,7 @@ function redacted(cfg) {
 
 const publicStream = (s) => ({
   ref: s.ref, name: s.name, filename: s.filename, resolution: s.resolution, size: s.size, seeders: s.seeders,
-  provider: s.provider, audioLangs: s.audioLangs, cached: s.cached, hdr: s.hdr, source: s.source, codec: s.codec, languageMatch: s.languageMatch,
+  provider: s.provider, audioLangs: s.audioLangs, langs: [...detectLanguages(s).codes].map((c) => LANGS[c]?.name || c), cached: s.cached, hdr: s.hdr, source: s.source, codec: s.codec, languageMatch: s.languageMatch,
 });
 
 async function readBody(req) {
@@ -253,9 +253,16 @@ function createServer(port) {
       let all;
       try { all = await torrentio.fetchStreams(cfg, type, id); } catch (e) { throw new HttpError(502, e.message); }
       for (const s of all) streamsByRef.set(s.ref, s);
-      const { picks, hidden } = selectStreams(all, cfg);
-      const verified = await verifyAudio(picks, cfg, hidden);
+      let { picks, hidden } = selectStreams(all, cfg);
+      let verified = await verifyAudio(picks, cfg, hidden);
+      // Nothing in the user's language: better to offer every available stream (labelled) than an empty page.
+      let languageFallback = false;
+      if (!verified.length && all.length) {
+        const any = selectStreams(all, cfg, { ignoreLanguage: true });
+        if (any.picks.length) { verified = any.picks; hidden = { ...any.hidden, language: 0 }; languageFallback = true; }
+      }
       return {
+        languageFallback,
         total: all.length, hidden, language: LANGS[cfg.nativeLanguage]?.name || cfg.nativeLanguage,
         picks: verified.map((p) => ({ resolution: p.resolution, stream: publicStream(p.stream), alternatives: p.alternatives.map(publicStream) })),
       };
@@ -298,6 +305,18 @@ function createServer(port) {
       const cont = continueList(data);
       await backfillGenres(data);
       return { library: data.library, continueWatching: cont, watched: data.watched };
+    },
+    // Idempotent add (the toggle above is for the details page); used by the "+" on cover art.
+    async 'POST /api/library/add'(req) {
+      const { id, type, name, poster, genres } = await readBody(req);
+      if (!/^tt\d+$/.test(id || '') || !/^(movie|series)$/.test(type)) throw new HttpError(400, 'bad title');
+      const data = config.loadData();
+      if (!data.library.some((m) => m.id === id)) {
+        const clean = Array.isArray(genres) ? genres.filter((g) => typeof g === 'string').slice(0, 8) : [];
+        data.library.unshift({ id, type, name: String(name || ''), poster: String(poster || ''), genres: clean });
+        config.saveData(data);
+      }
+      return { inLibrary: true };
     },
     async 'POST /api/library/remove'(req) {
       const { id } = await readBody(req);

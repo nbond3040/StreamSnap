@@ -79,3 +79,11 @@ test('multi-audio that lists other languages is rejected; script in filename cou
   assert.equal(picks.length, 1);
   assert.deepEqual([picks[0].stream, ...picks[0].alternatives].map((s) => s.filename), [ok.filename]);
 });
+
+test('ignoreLanguage keeps every language when asked (used when none match the native one)', () => {
+  const only = parsed.filter((s) => /FRENCH|GERMAN/.test(s.filename));
+  assert.equal(selectStreams(only, cfg()).picks.length, 0);
+  const any = selectStreams(only, cfg(), { ignoreLanguage: true });
+  assert.deepEqual(any.picks.map((p) => p.resolution).sort(), ['1080p', '480p']);
+  assert.equal(any.hidden.language, 0);
+});

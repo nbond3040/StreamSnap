@@ -34,6 +34,23 @@ const showErr = (e) => h('div', { class: 'err' }, e.message || String(e));
 /** Inline error with a Retry button, so one failed lookup doesn't take the whole page down. */
 const retryBox = (e, retry) => h('div', { class: 'err retry' }, h('span', {}, (e && e.message) || 'Something went wrong.'), h('button', { class: 'btn sm ghost', onclick: retry }, 'Retry'));
 const settled = (results, i) => (results[i].status === 'fulfilled' ? { value: results[i].value } : { error: results[i].reason });
+const libraryIds = new Set(); // titles in the user's library, so cover art can offer "+" only where it makes sense
+
+const THEMES = {
+  midnight: { name: 'Midnight', bg: '#0b0b10', bar: '#1b1b26', accent: '#7c5cff' },
+  graphite: { name: 'Graphite', bg: '#131316', bar: '#242429', accent: '#6c8cff' },
+  amoled: { name: 'AMOLED', bg: '#000000', bar: '#15151a', accent: '#8b6cff' },
+  ocean: { name: 'Ocean', bg: '#08121c', bar: '#152a3f', accent: '#2ea0ff' },
+  forest: { name: 'Forest', bg: '#0b130e', bar: '#1a2b20', accent: '#2fbf75' },
+  rose: { name: 'Rose', bg: '#150b12', bar: '#2d1a27', accent: '#ff5c93' },
+  light: { name: 'Light', bg: '#f4f4f9', bar: '#dedeea', accent: '#6a4cf0' },
+};
+function applyTheme(id) {
+  if (!THEMES[id]) id = 'midnight';
+  document.documentElement.dataset.theme = id;
+  try { localStorage.setItem('ss.theme', id); } catch { /* optional */ }
+}
+
 const resLabel = (r) => (r === '2160p' ? '4K' : r);
 const RES_ORDER = ['2160p', '1440p', '1080p', '720p', '576p', '480p', '360p'];
 
@@ -46,6 +63,16 @@ function card(m, prog, onRemove, onOpen) {
     h('div', { class: 'img', style: m.poster ? `background-image:url("${encodeURI(m.poster)}")` : '' },
       m.imdbRating && h('span', { class: 'rate' }, '★ ' + m.imdbRating), play),
     h('div', { class: 't' }, m.name, (m.releaseInfo || m.year || m.season) && h('small', {}, m.season ? `S${m.season} E${m.episode}` : m.releaseInfo || m.year)));
+  if (!onRemove && !libraryIds.has(id) && /^tt\d+$/.test(id)) {
+    const a = h('button', { class: 'rm add', title: 'Add to library', 'aria-label': 'Add to library', onclick: async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      try {
+        await api('/library/add', { id, type: m.type, name: m.name, poster: m.poster, genres: m.genres || [] });
+        libraryIds.add(id); a.remove(); toast('Added to library');
+      } catch (err) { toast(err.message); }
+    } });
+    setIcon(a, 'plus'); c.append(a);
+  }
   if (onRemove) {
     const x = h('button', { class: 'rm', title: 'Remove', 'aria-label': 'Remove', onclick: (e) => { e.preventDefault(); e.stopPropagation(); onRemove(c); } });
     setIcon(x, 'close'); c.append(x);
@@ -67,6 +94,7 @@ async function home() {
   view.replaceChildren(h('div', { style: 'height:360px' }), ...section('Popular movies', skeletons()));
   const [libR, moviesR, seriesR, cfgR] = await Promise.allSettled([api('/library'), api('/catalog?type=movie'), api('/catalog?type=series'), api('/config')]);
   const lib = libR.status === 'fulfilled' ? libR.value : { continueWatching: [] };
+  if (lib.library) { libraryIds.clear(); lib.library.forEach((m) => libraryIds.add(m.id)); }
   const cfg = cfgR.status === 'fulfilled' ? cfgR.value : { hasRealDebridKey: true };
   const movies = moviesR.status === 'fulfilled' ? moviesR.value : [];
   const series = seriesR.status === 'fulfilled' ? seriesR.value : [];
@@ -134,6 +162,7 @@ async function libraryView() {
 
   async function remove(el) {
     await api('/library/remove', { id: el.dataset.id });
+    libraryIds.delete(el.dataset.id);
     items.splice(items.findIndex((m) => m.id === el.dataset.id), 1);
     render();
   }
@@ -181,7 +210,7 @@ async function buildContext(base, vid, ep, episodes) {
   return {
     type: base.type, vid, title: base.name, subtitleLine: ep ? label(ep) : '', key: `${base.type}:${vid}`,
     meta: { type: base.type, id: base.id, name: base.name, poster: base.poster, videoId: vid, season: ep?.season, episode: ep?.episode },
-    picks: res.picks, hidden: res.hidden, total: res.total, language: res.language, subs,
+    picks: res.picks, hidden: res.hidden, languageFallback: !!res.languageFallback, total: res.total, language: res.language, subs,
     series: ep ? { episodes, load: (e) => buildContext(base, e.vid, e, episodes) } : null,
     next: nxt ? { label: label(nxt), load: () => buildContext(base, nxt.vid, nxt, episodes) } : null,
   };
@@ -193,12 +222,13 @@ function bestPick(ctx, preferred) {
   return (atOrBelow[0] || ctx.picks[ctx.picks.length - 1]).resolution;
 }
 
-function streamChips(s) {
+function streamChips(s, showLangs) {
   return h('div', { class: 'chips' },
     h('span', { class: 'chip ' + (s.cached ? 'ok' : 'warn') }, s.cached ? 'cached' : 'not cached'),
     s.size > 0 && h('span', { class: 'chip' }, fmtSize(s.size)), s.source && h('span', { class: 'chip' }, s.source),
     s.codec && h('span', { class: 'chip' }, s.codec), s.hdr && h('span', { class: 'chip' }, 'HDR'),
     s.audioLangs && s.audioLangs.length > 0 && h('span', { class: 'chip ok' }, '🔊 ' + s.audioLangs.join('/')),
+    showLangs && h('span', { class: 'chip warn' }, '🔊 ' + (s.langs && s.langs.length ? s.langs.join(' / ') : 'language unknown')),
     h('span', { class: 'chip' }, `👤 ${s.seeders}`), s.languageMatch === 'multi' && h('span', { class: 'chip' }, 'multi-audio'));
 }
 
@@ -212,9 +242,10 @@ function renderStreams(box, ctx, cfg) {
   const withAlt = (res, alt) => ({ ...ctx, picks: ctx.picks.map((p) => (p.resolution === res ? { ...p, stream: alt } : p)) });
   box.replaceChildren(h('div', { class: 'panel' },
     h('h3', {}, 'Auto-selected streams', h('span', { class: 'subtle' }, 'best per resolution')),
+    ctx.languageFallback && h('div', { class: 'notice warn' }, `No ${ctx.language} streams were found for this title, so every available stream is shown. Check each one's audio language.`),
     h('div', { class: 'picks' }, ctx.picks.map((p) => h('div', { class: 'pick' },
       h('div', { class: 'q r' + p.resolution }, resLabel(p.resolution)),
-      h('div', { class: 'fn' }, p.stream.filename), streamChips(p.stream),
+      h('div', { class: 'fn' }, p.stream.filename), streamChips(p.stream, ctx.languageFallback),
       h('div', {}, h('button', { class: 'btn sm', onclick: () => Player.open(ctx, p.resolution) }, '▶ Play')),
       p.alternatives.length > 0 && h('details', { class: 'alts' }, h('summary', {}, `${p.alternatives.length} other options`),
         p.alternatives.map((a) => h('div', { class: 'alt' }, h('span', {}, `${fmtSize(a.size)} · ${a.source || '?'} ${a.codec} · 👤${a.seeders}`),
@@ -276,7 +307,7 @@ async function loadCollection(box, id) {
     const here = c.parts.findIndex((p) => p.id === id);
     const cards = c.parts.map((p, i) => {
       const el = card({ id: p.id, type: 'movie', name: p.name, poster: p.poster, releaseInfo: [p.year, i === here + 1 && 'Next'].filter(Boolean).join(' · ') });
-      if (p.id === id) { el.classList.add('current'); el.removeAttribute('href'); el.title = 'You are here'; el.querySelector('.playbtn')?.remove(); }
+      if (p.id === id) { el.classList.add('current'); el.removeAttribute('href'); el.title = 'You are here'; el.querySelector('.playbtn')?.remove(); el.querySelector('.add')?.remove(); }
       return el;
     });
     box.replaceChildren(h('h2', { class: 'sec' }, c.name, h('span', { class: 'count' }, `${c.parts.length} films`)), h('div', { class: 'scroller' }, cards));
@@ -290,7 +321,7 @@ async function detail(type, id) {
   const streamsBox = h('div');
   const playBtn = h('button', { class: 'btn', disabled: true }, 'Finding streams…');
   const libBtn = h('button', { class: 'btn ghost' }, meta.inLibrary ? '✓ In library' : '+ Library');
-  libBtn.onclick = async () => { const r = await api('/library', base); libBtn.textContent = r.inLibrary ? '✓ In library' : '+ Library'; };
+  libBtn.onclick = async () => { const r = await api('/library', base); r.inLibrary ? libraryIds.add(id) : libraryIds.delete(id); libBtn.textContent = r.inLibrary ? '✓ In library' : '+ Library'; };
   let inContinue = !!meta.inContinue;
   const keepLabel = () => (inContinue ? '✓ Keep watching' : '+ Keep watching');
   const keepBtn = h('button', { class: 'btn ghost', title: 'Show this title in Continue watching on the home page' }, keepLabel());
@@ -366,7 +397,15 @@ async function settings() {
   const check = (name, label, hint) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name, checked: !!cfg[name] }), h('div', {}, h('div', {}, label), hint && h('small', { class: 'subtle' }, hint)));
   const select = (name, opts) => h('select', { name }, Object.entries(opts).map(([v, t]) => h('option', { value: v, selected: v === cfg[name] }, t)));
   const p = info.players;
+  const themeBtns = Object.entries(THEMES).map(([id, t]) => {
+    const b = h('button', { type: 'button', class: 'theme' + (document.documentElement.dataset.theme === id ? ' on' : ''), onclick: () => {
+      applyTheme(id); themeBtns.forEach((x) => x.classList.toggle('on', x === b));
+      api('/config', { theme: id }).catch((e) => toast(e.message));
+    } }, h('div', { class: 'sw', style: `background:${t.bg}` }, h('i', { style: `top:10px;background:${t.bar};` }), h('i', { style: `top:24px;right:30px;background:${t.bar};` }), h('b', { style: `background:${t.accent}` })), h('span', {}, t.name));
+    return b;
+  });
   f.append(
+    h('div', { class: 'card2' }, h('h2', {}, 'Appearance'), h('div', { class: 'themes' }, themeBtns)),
     h('div', { class: 'card2' }, h('h2', {}, 'Accounts'),
       field(`Real-Debrid API key${cfg.hasRealDebridKey ? ` — saved (ends ${cfg.realDebridKeyHint})` : ''}`, text('realDebridKey', 'password', cfg.hasRealDebridKey ? 'Leave blank to keep the saved key' : 'real-debrid.com/apitoken'), 'Stored only on this computer.'),
       field(`TMDB API key (optional)${cfg.hasTmdbKey ? ' — saved' : ''}`, text('tmdbKey', 'password', cfg.hasTmdbKey ? 'Leave blank to keep the saved key' : 'themoviedb.org/settings/api'),
@@ -412,5 +451,21 @@ async function route() {
 }
 window.onPlayerClosed = () => { if (/^#?\/?$|detail/.test(location.hash.replace('#', '')) || !location.hash) route(); };
 addEventListener('hashchange', route);
-$('#search').onsubmit = (e) => { e.preventDefault(); const q = new FormData(e.target).get('q').trim(); if (q) location.hash = '#/search/' + encodeURIComponent(q); };
-api('/info').then((i) => { APPINFO = i; }).catch(() => {}).finally(route);
+$('#search').onsubmit = (e) => {
+  e.preventDefault();
+  const input = e.target.elements.q, q = input.value.trim();
+  if (q) location.hash = '#/search/' + encodeURIComponent(q);
+  input.value = ''; input.blur(); // the box is for the next search; the results page shows what was searched
+};
+
+// Over a horizontally scrolling row the wheel scrolls that row, not the page.
+view.addEventListener('wheel', (e) => {
+  const row = e.target.closest && e.target.closest('.scroller');
+  if (!row || row.scrollWidth <= row.clientWidth || e.ctrlKey) return;
+  if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) { e.preventDefault(); row.scrollLeft += e.deltaY; }
+}, { passive: false });
+Promise.allSettled([api('/info'), api('/library'), api('/config')]).then(([info, lib, cfg]) => {
+  if (info.status === 'fulfilled') APPINFO = info.value;
+  if (lib.status === 'fulfilled') lib.value.library.forEach((m) => libraryIds.add(m.id));
+  if (cfg.status === 'fulfilled' && cfg.value.theme) applyTheme(cfg.value.theme);
+}).finally(route);

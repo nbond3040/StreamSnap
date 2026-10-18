@@ -33,7 +33,9 @@ http.createServer((req, res) => {
   if (u.pathname === '/3/collection/9') return json({ name: 'Mock Collection', parts: [{ id: 102, title: 'Mock Movie 3', release_date: '2026-05-01', poster_path: null }, { id: 100, title: 'Mock Movie', release_date: '2024-05-01', poster_path: null }, { id: 101, title: 'Mock Movie 2', release_date: '2025-05-01', poster_path: null }] });
   if ((m = /^\/3\/movie\/(\d+)\/external_ids$/.exec(u.pathname))) return json({ imdb_id: 'tt0000' + m[1] });
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
+  if (u.pathname === '/meta/movie/tt0000003.json') return json({ meta: { ...movie, id: 'tt0000003', imdb_id: 'tt0000003', name: 'Only French' } });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });
+  if (/\/stream\/movie\/tt0000003/.test(u.pathname)) return json({ streams: [stream('1080p', 'FRA1', 'a.webm', '\n🇫🇷'), stream('720p', 'FRA2', 'a.webm', '\n🇫🇷')] });
   if (/\/stream\//.test(u.pathname)) {
     return json({ streams: [stream('1080p', 'AC3', 'b.mkv'), stream('720p', 'OPUS', 'a.webm'), stream('480p', 'OPUS2', 'a.webm'), stream('1080p', 'FR', 'a.webm', '\n🇫🇷'), stream('1080p', 'UNFLAGGEDFR', 'c.webm'), stream('2160p', 'DUALTRACK', 'd.mkv')] });
   }

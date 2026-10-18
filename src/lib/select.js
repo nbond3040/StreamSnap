@@ -22,14 +22,14 @@ function score(s, cfg, reason) {
  * Filter streams to the user's language/quality rules and pick the best one per resolution.
  * Returns { picks: [{resolution, stream, alternatives}], hidden: {language, uncached, quality, hdr} }.
  */
-function selectStreams(streams, cfg) {
+function selectStreams(streams, cfg, opts = {}) {
   const hidden = { language: 0, uncached: 0, quality: 0, hdr: 0 };
   const byRes = new Map();
   for (const s of streams) {
     if (s.cam) { hidden.quality++; continue; }
     if (!s.cached && !cfg.allowUncached) { hidden.uncached++; continue; }
     if (cfg.hdrPolicy === 'only' && !s.hdr) { hidden.hdr++; continue; }
-    const lang = matchesNative(s, cfg);
+    const lang = opts.ignoreLanguage ? { ok: true, reason: 'any' } : matchesNative(s, cfg); // 'any': no native-language stream existed
     if (!lang.ok) { hidden.language++; continue; }
     if (!cfg.resolutions.includes(s.resolution)) { hidden.quality++; continue; }
     const entry = { ...s, languageMatch: lang.reason, score: score(s, cfg, lang.reason) };
