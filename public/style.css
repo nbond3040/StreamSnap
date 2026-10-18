@@ -156,3 +156,20 @@ details.alts summary { cursor:pointer; color:var(--dim); font-size:13px; user-se
 #pEpList .ep.on { cursor:default; }
 #player.idle #pSide { opacity:1; pointer-events:auto; }
 #pEps { font-size:14px; font-weight:600; }
+
+/* icons */
+.ico { width:22px; height:22px; display:block; }
+.iconbtn { width:44px; height:44px; } .iconbtn .ico { width:24px; height:24px; }
+.pbtn { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+.pbtn .ico { width:24px; height:24px; }
+#pQ, #pCC, #pEps { --knob:#0b0b10; }
+#pQ .ico { --knob:rgba(10,10,16,.9); }
+video::-internal-media-controls-overlay-cast-button { display:none; }
+#pVol { -webkit-appearance:none; appearance:none; width:96px; height:4px; border-radius:2px; background:rgba(255,255,255,.3); outline:0; cursor:pointer; }
+#pVol::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:#fff; border:0; }
+#pVol::-moz-range-thumb { width:13px; height:13px; border-radius:50%; background:#fff; border:0; }
+.menu .sync { display:flex; align-items:center; justify-content:space-between; padding:6px 12px; gap:10px; font-size:14px; }
+.menu .sync .st { display:flex; align-items:center; gap:4px; }
+.menu .sync button { width:30px; height:30px; padding:0; justify-content:center; border:1px solid var(--line); }
+.menu .sync output { min-width:64px; text-align:center; font-variant-numeric:tabular-nums; }
+.menu .info { padding:8px 12px 4px; font-size:12px; color:var(--dim); border-top:1px solid var(--line); margin-top:4px; }

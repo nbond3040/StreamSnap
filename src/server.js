@@ -156,16 +156,22 @@ async function rawProbe(ref) {
 }
 
 /** Remux (or transcode when needed) to fragmented MP4 so any stream plays in the app window. */
-async function compatStream(req, res, ref, t) {
+async function compatStream(req, res, ref, t, delay = 0) {
   const url = await resolveFinal(ref);
   const info = await probe(ref);
   const copyVideo = (info.video === 'h264' && info.eightBit !== false) || info.video === 'vp9' || info.video === 'av1';
   const copyAudio = info.audio === 'opus'; // Opus-in-MP4 decodes in every Chromium build, AAC needs proprietary codecs
-  const audioMap = `0:a:${info.audioIndex || 0}?`;
-  const args = ['-v', 'error', '-ss', String(Math.max(0, t)), '-i', url, '-map', '0:v:0', '-map', audioMap, '-sn',
+    delay = Math.max(-10, Math.min(10, delay));
+  // Stream-copied video can only start on a keyframe; -noaccurate_seek keeps audio and video in step there.
+  const seekFlags = copyVideo ? ['-noaccurate_seek'] : [];
+  const inputs = delay
+    ? [...seekFlags, '-ss', String(t), '-i', url, '-itsoffset', String(delay), ...seekFlags, '-ss', String(t), '-i', url]
+    : [...seekFlags, '-ss', String(t), '-i', url];
+  const aIn = delay ? 1 : 0;
+  const args = ['-v', 'error', '-fflags', '+genpts', ...inputs, '-map', '0:v:0', '-map', `${aIn}:a:${info.audioIndex || 0}?`, '-sn',
     ...(copyVideo ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p']),
-    ...(copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'libopus', '-b:a', '160k', '-ac', '2', '-strict', '-2']),
-    '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1'];
+    ...(copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'libopus', '-b:a', '160k', '-ac', '2', '-strict', '-2', '-af', 'aresample=async=1:first_pts=0']),
+    '-avoid_negative_ts', 'make_zero', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1'];
   const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'ignore'] });
   res.writeHead(200, { 'content-type': 'video/mp4', 'cache-control': 'no-store' });
   ff.stdout.pipe(res);
@@ -283,7 +289,7 @@ function createServer(port) {
       }
       let m;
       if ((m = /^\/api\/stream\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return proxyStream(req, res, m[1]);
-      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0);
+      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0);
       if ((m = /^\/api\/sub\/([0-9a-f]{20})\.vtt$/.exec(url.pathname)) && req.method === 'GET') {
         const vtt = await subtitles.fetchVtt(m[1]);
         res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8' });

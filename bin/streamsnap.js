@@ -5,6 +5,7 @@ const path = require('path');
 const config = require('../src/lib/config');
 const { createServer } = require('../src/server');
 const { which } = require('../src/lib/player');
+const { ensureDesktopEntry } = require('../src/lib/desktop');
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => {
@@ -12,9 +13,14 @@ const opt = (name, fallback) => {
   return i >= 0 ? args[i + 1] : fallback;
 };
 if (args.includes('--help') || args.includes('-h')) {
-  console.log('Usage: streamsnap [--port 7878] [--no-open] [--browser]\n  --no-open  only start the server\n  --browser  open in your default browser instead of an app window');
+  console.log('Usage: streamsnap [--port 7878] [--no-open] [--browser] [--install]\n  --install  add StreamSnap (with icon) to the app menu and exit\n  --no-open  only start the server\n  --browser  open in your default browser instead of an app window');
   process.exit(0);
 }
+if (args.includes('--install')) {
+  console.log('Installed app-menu entry:', ensureDesktopEntry() || '(not supported on this OS)');
+  process.exit(0);
+}
+if (!process.env.STREAMSNAP_NO_DESKTOP) ensureDesktopEntry(); // keeps the menu entry and icon current
 const port = Number(opt('--port', process.env.STREAMSNAP_PORT || 7878));
 const BROWSERS = ['google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser', 'brave-browser', 'microsoft-edge', 'vivaldi'];
 

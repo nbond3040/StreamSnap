@@ -5,7 +5,7 @@ const Player = (() => {
   const $ = (s) => document.querySelector(s);
   const root = $('#player'), video = $('#video'), seek = $('#pSeek');
   let ctx, pick, stream, mode, offset = 0, duration = 0, info = {}, fellBack = false;
-  let lastSave = 0, nextPromise = null, subTracks = [], activeSub = -1, idleTimer, token = 0;
+  let audioDelay = Number(localStorage.getItem('ss.audioDelay') || 0), lastSave = 0, nextPromise = null, subTracks = [], activeSub = -1, idleTimer, token = 0;
 
   const fmt = (t) => {
     t = Math.max(0, Math.floor(t || 0));
@@ -39,7 +39,7 @@ const Player = (() => {
     info = await api('/probe?ref=' + s.ref).catch(() => ({ mode: 'direct' }));
     if (my !== token) return;
     duration = info.duration || 0;
-    mode = info.mode === 'compat' ? 'compat' : 'direct';
+    mode = info.mode === 'compat' || (audioDelay !== 0 && info.ffmpeg) ? 'compat' : 'direct';
     setSource(at);
     if (autoplay) video.play().catch(() => {});
     updateQuality();
@@ -47,7 +47,7 @@ const Player = (() => {
 
   function setSource(at) {
     at = Math.max(0, at || 0);
-    if (mode === 'compat') { offset = at; video.src = `/api/compat/${stream.ref}?t=${at}`; }
+    if (mode === 'compat') { offset = at; video.src = `/api/compat/${stream.ref}?t=${at}&a=${audioDelay / 1000}`; }
     else {
       offset = 0; video.src = `/api/stream/${stream.ref}`;
       video.addEventListener('loadedmetadata', () => { if (at) video.currentTime = at; }, { once: true });
@@ -100,12 +100,12 @@ const Player = (() => {
   video.addEventListener('click', toggle);
   video.addEventListener('dblclick', fullscreen);
   $('#pPlay').onclick = toggle;
-  video.addEventListener('play', () => ($('#pPlay').textContent = '⏸'));
-  video.addEventListener('pause', () => { $('#pPlay').textContent = '▶'; markProgress(); });
+  video.addEventListener('play', () => (setIcon($('#pPlay span'), 'pause')));
+  video.addEventListener('pause', () => { setIcon($('#pPlay span'), 'play'); markProgress(); });
   $('#pMute').onclick = () => { video.muted = !video.muted; };
   $('#pVol').oninput = (e) => { video.volume = +e.target.value; video.muted = false; };
   video.addEventListener('volumechange', () => {
-    $('#pMute').textContent = video.muted || !video.volume ? '🔇' : '🔊';
+    setIcon($('#pMute span'), video.muted || !video.volume ? 'mute' : video.volume < 0.5 ? 'volumeLow' : 'volume');
     $('#pVol').value = video.muted ? 0 : video.volume;
   });
   function fullscreen() { document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen().catch(() => {}); }
@@ -150,14 +150,38 @@ const Player = (() => {
   // ---------- quality ----------
   function buildMenus() {
     const q = $('#pQMenu');
+    const out = h('output', {}, '');
+    const showDelay = () => { out.textContent = (audioDelay > 0 ? '+' : '') + audioDelay + ' ms'; };
+    let t;
+    const nudge = (d) => {
+      audioDelay = Math.max(-5000, Math.min(5000, audioDelay + d)); showDelay();
+      localStorage.setItem('ss.audioDelay', audioDelay);
+      clearTimeout(t); t = setTimeout(applySync, 700);
+    };
+    showDelay();
     q.replaceChildren(h('div', { class: 'mh' }, 'Quality'), ...ctx.picks.map((p) => h('button', {
       'data-res': p.resolution, class: p.resolution === pick.resolution ? 'on' : '',
       onclick: () => switchQuality(p.resolution),
-    }, h('span', {}, resLabel(p.resolution)), h('small', {}, [p.stream.size && fmtSize(p.stream.size), p.stream.codec].filter(Boolean).join(' · ')))));
+    }, h('span', {}, resLabel(p.resolution)), h('small', {}, [p.stream.size && fmtSize(p.stream.size), p.stream.codec].filter(Boolean).join(' · ')))),
+      h('div', { class: 'mh' }, 'Audio sync'),
+      h('div', { class: 'sync' }, h('span', {}, 'Audio delay'), h('span', { class: 'st' },
+        h('button', { class: 'pbtn', title: 'Audio earlier', onclick: () => nudge(-100) }, '−'), out,
+        h('button', { class: 'pbtn', title: 'Audio later', onclick: () => nudge(100) }, '+'))),
+      h('div', { class: 'info', id: 'pInfo' }, ''));
     updateQuality();
   }
+  /** Re-open the converted stream at the current position so the new audio delay takes effect. */
+  function applySync() {
+    if (!stream) return;
+    if (!(window.APPINFO || {}).players?.ffmpeg) return toast('Install ffmpeg to adjust audio sync');
+    const wasPaused = video.paused, t = cur();
+    mode = 'compat'; setSource(t); updateQuality();
+    if (!wasPaused) video.play().catch(() => {});
+  }
   function updateQuality() {
-    $('#pQ').textContent = pick ? resLabel(pick.resolution) : 'Quality';
+    const i = $('#pInfo');
+    if (i && stream) i.textContent = `${mode === 'compat' ? 'Converted' : 'Direct play'} · ${info.video || '?'} / ${info.audio || '?'}${info.duration ? '' : ''}`;
+    $('#pQLabel').textContent = pick ? resLabel(pick.resolution) : 'Auto';
     $('#pQMenu').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.res === pick.resolution));
   }
   function switchQuality(res) {

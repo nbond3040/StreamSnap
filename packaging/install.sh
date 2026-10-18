@@ -1,20 +1,9 @@
 #!/bin/sh
-# Installs a `streamsnap` launcher and an app-menu entry for the current user.
+# Adds StreamSnap (icon + app-menu entry) for the current user, plus a `streamsnap` command.
 set -e
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
-mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps"
-cp "$SRC/public/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/streamsnap.svg"
+node "$SRC/bin/streamsnap.js" --install
+mkdir -p "$HOME/.local/bin"
 printf '#!/bin/sh\nexec node "%s/bin/streamsnap.js" "$@"\n' "$SRC" > "$HOME/.local/bin/streamsnap"
 chmod +x "$HOME/.local/bin/streamsnap"
-cat > "$HOME/.local/share/applications/streamsnap.desktop" <<DESK
-[Desktop Entry]
-Type=Application
-Name=StreamSnap
-Comment=Stream movies and series via Torrentio and Real-Debrid
-Exec=$HOME/.local/bin/streamsnap
-Icon=streamsnap
-StartupWMClass=StreamSnap
-Terminal=false
-Categories=AudioVideo;Video;
-DESK
-echo "Installed. Run 'streamsnap' or find StreamSnap in your app menu."
+echo "Done. Run 'streamsnap' or find StreamSnap in your app menu (you may need to log out/in for the menu to refresh)."
