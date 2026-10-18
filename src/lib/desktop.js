@@ -34,6 +34,11 @@ PATH="${nodeDir}:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export PATH
 NODE="${process.execPath}"
 [ -x "$NODE" ] || NODE="$(command -v node)"
+if [ ! -f "${script}" ]; then
+  echo "$(date): ${script} is missing (was the StreamSnap folder moved or deleted?)" >> "${log}"
+  command -v notify-send >/dev/null && notify-send "StreamSnap" "The StreamSnap folder moved. Run: node /new/path/bin/streamsnap.js --install"
+  exit 1
+fi
 cd "${root}" || exit 1
 if [ -z "$NODE" ]; then
   echo "$(date): node not found" >> "${log}"
