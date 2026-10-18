@@ -33,9 +33,30 @@ function openWindow(url) {
   }
   return spawn(bin, [
     `--app=${url}`, `--user-data-dir=${path.join(config.dir, 'window-profile')}`, '--class=StreamSnap',
-    '--window-size=1360,860', '--autoplay-policy=no-user-gesture-required', '--no-first-run', '--no-default-browser-check',
+    '--window-size=1360,860', '--autoplay-policy=no-user-gesture-required',
+    '--enable-features=VaapiVideoDecoder,VaapiVideoDecodeLinuxGL,VaapiIgnoreDriverChecks', '--ignore-gpu-blocklist', '--no-first-run', '--no-default-browser-check',
   ], { stdio: 'ignore' });
 }
+
+/** Native window via Electron when it's installed (npm install). Retries without the sandbox if the OS blocks it. */
+function runElectron() {
+  let electron;
+  try { electron = require('electron'); } catch { return false; }
+  if (typeof electron !== 'string' || args.includes('--browser')) return false;
+  const main = path.join(__dirname, '..', 'desktop', 'main.cjs');
+  const launch = (extra) => {
+    const started = Date.now();
+    const child = spawn(electron, [...extra, main], { stdio: 'inherit', env: { ...process.env, STREAMSNAP_PORT: String(port) } });
+    child.on('exit', (code, signal) => {
+      if ((code || signal) && Date.now() - started < 8000 && !extra.length) return launch(['--no-sandbox']); // userns/SUID sandbox unavailable
+      process.exit(code || 0);
+    });
+  };
+  launch([]);
+  return true;
+}
+
+if (!args.includes('--no-open') && runElectron()) return;
 
 const server = createServer(port);
 server.listen(port, '127.0.0.1', () => {

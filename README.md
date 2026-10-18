@@ -2,14 +2,15 @@
 
 A Stremio-style streaming app for Linux that uses **Torrentio + Real-Debrid** and automatically picks the best stream **at each available resolution**, **only in your native language**.
 
-It runs as a desktop app: a small Node server on `127.0.0.1:7878` shown in its own app window (Chromium/Chrome/Brave/Edge `--app` mode; falls back to your default browser). Closing the window quits the app.
+It runs as a desktop app: a small Node server on `127.0.0.1` shown in a native Electron window (after `npm install`). Without Electron it falls back to a Chromium/Chrome/Brave/Edge `--app` window, then your default browser. Closing the window quits the app.
 
 **Install ffmpeg** (`sudo apt install ffmpeg`) for the best experience: it lets StreamSnap check each file's real audio tracks, play the track in your language, and convert audio/video formats browsers can't play (AC3/DTS audio, HEVC video) on the fly.
 
 ## Run
 
 ```sh
-node bin/streamsnap.js          # needs Node 20+; no npm install required
+npm install                     # once: installs Electron for the native window with the app icon (optional)
+node bin/streamsnap.js          # needs Node 20+
 ./packaging/install.sh          # optional: app-menu launcher + `streamsnap` command
 ```
 
