@@ -57,7 +57,7 @@ function saveConfig(patch) {
   return next;
 }
 
-const DATA_DEFAULTS = { library: [], progress: {}, watched: {} };
+const DATA_DEFAULTS = { library: [], progress: {}, watched: {}, pinned: [] };
 function loadData() { return { ...DATA_DEFAULTS, ...readJson(dataFile, {}) }; }
 function saveData(data) { writeJson(dataFile, data); }
 

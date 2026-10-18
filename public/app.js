@@ -181,6 +181,13 @@ function buildEpisodes(meta, id) {
     .sort((a, b) => a.season - b.season || a.episode - b.episode);
 }
 
+/** Where to pick a series up: the episode in progress, else the one after the last finished, else the first unwatched. */
+function startEpisode(meta, episodes) {
+  const last = meta.lastWatched, li = last ? episodes.findIndex((e) => e.vid === last.videoId) : -1;
+  if (li >= 0) return last.finished ? episodes[li + 1] || episodes[li] : episodes[li];
+  return episodes.find((e) => !e.watched) || episodes[0];
+}
+
 /** Continue watching: reopen the same stream (or the closest match) at the saved position. */
 async function resumeWatching(item) {
   const detailHash = `#/detail/${item.type}/${item.id}`;
@@ -189,10 +196,13 @@ async function resumeWatching(item) {
   try {
     const cfg = await api('/config');
     let ctx;
-    if (item.type === 'series' && item.videoId) {
+    if (item.type === 'series') {
+      // Pinned series have no saved episode yet, so work out where to start from the watch history.
       const meta = await api(`/meta?type=series&id=${item.id}`);
       const episodes = buildEpisodes(meta, item.id);
-      ctx = await buildContext(base, item.videoId, episodes.find((e) => e.vid === item.videoId) || null, episodes);
+      const ep = (item.videoId && episodes.find((e) => e.vid === item.videoId)) || startEpisode(meta, episodes);
+      if (!ep) throw new Error('No episodes listed for this series');
+      ctx = await buildContext(base, ep.vid, ep, episodes);
     } else ctx = await buildContext(base, item.id, null);
     if (!ctx.picks.length) { toast('No streams available right now'); location.hash = detailHash; return; }
     const saved = item.stream || {};
@@ -213,6 +223,14 @@ async function detail(type, id) {
   const playBtn = h('button', { class: 'btn', disabled: true }, 'Finding streams…');
   const libBtn = h('button', { class: 'btn ghost' }, meta.inLibrary ? '✓ In library' : '+ Library');
   libBtn.onclick = async () => { const r = await api('/library', base); libBtn.textContent = r.inLibrary ? '✓ In library' : '+ Library'; };
+  let inContinue = !!meta.inContinue;
+  const keepLabel = () => (inContinue ? '✓ Keep watching' : '+ Keep watching');
+  const keepBtn = h('button', { class: 'btn ghost', title: 'Show this title in Continue watching on the home page' }, keepLabel());
+  keepBtn.onclick = async () => {
+    await api(inContinue ? '/continue/remove' : '/continue/add', base);
+    inContinue = !inContinue; keepBtn.textContent = keepLabel();
+    toast(inContinue ? 'Added to Continue watching' : 'Removed from Continue watching');
+  };
 
   const metaLine = [meta.year || meta.releaseInfo, meta.runtime].filter(Boolean);
   const hero = h('div', { class: 'dhero', style: meta.background ? `background-image:url("${encodeURI(meta.background)}")` : '' },
@@ -223,7 +241,7 @@ async function detail(type, id) {
         h('div', { class: 'chips' }, (meta.genres || []).map((g) => h('span', { class: 'chip' }, g))),
         h('p', { class: 'desc' }, meta.description || ''),
         meta.cast && h('div', { class: 'subtle' }, 'Cast: ' + meta.cast.slice(0, 6).join(', ')),
-        h('div', { class: 'actions' }, playBtn, libBtn))));
+        h('div', { class: 'actions' }, playBtn, keepBtn, libBtn))));
 
   function ready(ctx) {
     renderStreams(streamsBox, ctx, cfg);
@@ -245,10 +263,7 @@ async function detail(type, id) {
   const episodes = buildEpisodes(meta, id);
   const seasons = [...new Set(episodes.map((e) => e.season))];
   // Reopen where the user left off: the episode in progress, or the one after the last one they finished.
-  let start;
-  const last = meta.lastWatched, li = last ? episodes.findIndex((e) => e.vid === last.videoId) : -1;
-  if (li >= 0) start = last.finished ? episodes[li + 1] || episodes[li] : episodes[li];
-  start = start || episodes.find((e) => !e.watched) || episodes[0];
+  const start = startEpisode(meta, episodes);
 
   const epBox = h('div', { class: 'eps' });
   const sSel = h('select', { class: 'pill', onchange: () => drawEps() }, seasons.map((s) => h('option', { value: s }, s === 0 ? 'Specials' : `Season ${s}`)));

@@ -81,6 +81,17 @@ async function verifyAudio(picks, cfg, hidden) {
   }).filter(Boolean);
 }
 
+/** Continue watching: the latest unfinished item per title, plus titles the user pinned by hand. */
+function continueList(data) {
+  const items = new Map();
+  const live = Object.entries(data.progress)
+    .filter(([, p]) => p.meta && p.pos > 10 && !(p.dur && p.pos / p.dur > 0.9))
+    .sort((a, b) => b[1].at - a[1].at);
+  for (const [key, p] of live) if (!items.has(p.meta.id)) items.set(p.meta.id, { key, pos: p.pos, dur: p.dur, at: p.at, ...p.meta });
+  for (const m of data.pinned || []) if (!items.has(m.id)) items.set(m.id, { key: null, pos: 0, dur: 0, ...m });
+  return [...items.values()].sort((a, b) => b.at - a.at).slice(0, 24);
+}
+
 function resumePoint(p) {
   return { pos: p && p.dur && p.pos > 10 && p.pos / p.dur < 0.9 ? p.pos : 0 };
 }
@@ -209,6 +220,7 @@ function createServer(port) {
       if (!meta) throw new HttpError(404, 'Not found');
       const data = config.loadData();
       meta.inLibrary = data.library.some((m) => m.id === meta.imdb_id);
+      meta.inContinue = continueList(data).some((c) => c.id === meta.imdb_id);
       meta.watched = data.watched;
       // Most recently touched episode of this series, so the page can reopen where the user left off.
       const last = Object.values(data.progress).filter((p) => p.meta && p.meta.id === meta.imdb_id && p.meta.videoId).sort((a, b) => b.at - a.at)[0];
@@ -263,10 +275,7 @@ function createServer(port) {
     },
     async 'GET /api/library'() {
       const data = config.loadData();
-      const cont = Object.entries(data.progress)
-        .filter(([k, p]) => p.meta && p.pos > 10 && !(p.dur && p.pos / p.dur > 0.9))
-        .sort((a, b) => b[1].at - a[1].at).slice(0, 20)
-        .map(([key, p]) => ({ key, pos: p.pos, dur: p.dur, ...p.meta }));
+      const cont = continueList(data);
       return { library: data.library, continueWatching: cont, watched: data.watched };
     },
     async 'POST /api/library/remove'(req) {
@@ -277,9 +286,19 @@ function createServer(port) {
       return { ok: true };
     },
     // "Continue watching" is derived from saved progress, so removing a title clears its progress entries.
+    async 'POST /api/continue/add'(req) {
+      const { id, type, name, poster } = await readBody(req);
+      if (!/^tt\d+$/.test(id || '') || !/^(movie|series)$/.test(type)) throw new HttpError(400, 'bad title');
+      const data = config.loadData();
+      data.pinned = (data.pinned || []).filter((m) => m.id !== id);
+      data.pinned.unshift({ id, type, name: String(name || ''), poster: String(poster || ''), at: Date.now() });
+      config.saveData(data);
+      return { ok: true };
+    },
     async 'POST /api/continue/remove'(req) {
       const { id } = await readBody(req);
       const data = config.loadData();
+      data.pinned = (data.pinned || []).filter((m) => m.id !== id);
       for (const [key, p] of Object.entries(data.progress)) if (p.meta && p.meta.id === id) delete data.progress[key];
       config.saveData(data);
       return { ok: true };
