@@ -35,7 +35,7 @@ const resLabel = (r) => (r === '2160p' ? '4K' : r);
 const RES_ORDER = ['2160p', '1440p', '1080p', '720p', '576p', '480p', '360p'];
 
 // ---------- cards ----------
-function card(m, prog, onRemove) {
+function card(m, prog, onRemove, onOpen) {
   const id = m.id || m.imdb_id;
   const c = h('a', { class: 'card', href: `#/detail/${m.type}/${id}` },
     h('div', { class: 'img', style: m.poster ? `background-image:url("${encodeURI(m.poster)}")` : '' },
@@ -45,10 +45,15 @@ function card(m, prog, onRemove) {
     const x = h('button', { class: 'rm', title: 'Remove', 'aria-label': 'Remove', onclick: (e) => { e.preventDefault(); e.stopPropagation(); onRemove(c); } });
     setIcon(x, 'close'); c.append(x);
   }
+  if (onOpen) {
+    c.addEventListener('click', (e) => { e.preventDefault(); onOpen(m); });
+    const i = h('a', { class: 'rm info', title: 'Details', 'aria-label': 'Details', href: `#/detail/${m.type}/${id}`, onclick: (e) => e.stopPropagation() });
+    setIcon(i, 'info'); c.append(i);
+  }
   if (prog && prog.dur) c.append(h('div', { class: 'prog' }, h('i', { style: `width:${Math.min(100, (prog.pos / prog.dur) * 100)}%` })));
   return c;
 }
-const scroller = (items, prog, onRemove) => h('div', { class: 'scroller' }, items.map((m) => card(m, prog && prog(m), onRemove)));
+const scroller = (items, prog, onRemove, onOpen) => h('div', { class: 'scroller' }, items.map((m) => card(m, prog && prog(m), onRemove, onOpen)));
 const skeletons = (n = 8) => h('div', { class: 'scroller' }, Array.from({ length: n }, () => h('div', { class: 'skel' })));
 const section = (title, body) => [h('h2', { class: 'sec' }, title), body];
 
@@ -69,7 +74,7 @@ async function home() {
   if (lib.continueWatching.length) {
     const byId = new Map(lib.continueWatching.map((c) => [c.id, c]));
     const remove = async (el) => { await api('/continue/remove', { id: el.dataset.id }); const row = el.parentElement; el.remove(); if (!row.children.length) { row.previousElementSibling.remove(); row.remove(); } };
-    const list = scroller(lib.continueWatching.map((c) => ({ ...c, name: c.name })), (m) => byId.get(m.id), remove);
+    const list = scroller(lib.continueWatching.map((c) => ({ ...c, name: c.name })), (m) => byId.get(m.id), remove, resumeWatching);
     [...list.children].forEach((el, i) => { el.dataset.id = lib.continueWatching[i].id; });
     out.push(...section('Continue watching', list));
   }
@@ -167,6 +172,39 @@ function renderStreams(box, ctx, cfg) {
     h('p', { class: 'subtle', style: 'margin:12px 0 0' }, note)));
 }
 
+/** Regular episodes (specials only if there is nothing else), sorted, with watched flags. */
+function buildEpisodes(meta, id) {
+  const all = (meta.videos || []).filter((v) => v.season != null && v.episode != null);
+  const regular = all.filter((v) => v.season > 0);
+  return (regular.length ? regular : all)
+    .map((v) => ({ vid: `${id}:${v.season}:${v.episode}`, season: v.season, episode: v.episode, title: v.name || v.title || `Episode ${v.episode}`, watched: !!meta.watched[`series:${id}:${v.season}:${v.episode}`] }))
+    .sort((a, b) => a.season - b.season || a.episode - b.episode);
+}
+
+/** Continue watching: reopen the same stream (or the closest match) at the saved position. */
+async function resumeWatching(item) {
+  const detailHash = `#/detail/${item.type}/${item.id}`;
+  const base = { id: item.id, type: item.type, name: item.name, poster: item.poster };
+  toast('Resuming…');
+  try {
+    const cfg = await api('/config');
+    let ctx;
+    if (item.type === 'series' && item.videoId) {
+      const meta = await api(`/meta?type=series&id=${item.id}`);
+      const episodes = buildEpisodes(meta, item.id);
+      ctx = await buildContext(base, item.videoId, episodes.find((e) => e.vid === item.videoId) || null, episodes);
+    } else ctx = await buildContext(base, item.id, null);
+    if (!ctx.picks.length) { toast('No streams available right now'); location.hash = detailHash; return; }
+    const saved = item.stream || {};
+    let res = ctx.picks.some((p) => p.resolution === saved.resolution) ? saved.resolution : bestPick(ctx, cfg.preferredResolution);
+    for (const p of ctx.picks) { // prefer the exact release that was playing
+      const hit = [p.stream, ...p.alternatives].find((s) => saved.filename && s.filename === saved.filename);
+      if (hit) { ctx = { ...ctx, picks: ctx.picks.map((q) => (q === p ? { ...q, stream: hit } : q)) }; res = p.resolution; break; }
+    }
+    Player.open(ctx, res);
+  } catch (e) { toast(e.message); location.hash = detailHash; }
+}
+
 async function detail(type, id) {
   view.replaceChildren(h('div', { class: 'empty', style: 'margin-top:40px' }, 'Loading…'));
   const [meta, cfg, lib] = await Promise.all([api(`/meta?type=${type}&id=${id}`), api('/config'), api('/library')]);
@@ -204,11 +242,7 @@ async function detail(type, id) {
   }
 
   // Series: episode list on the left, streams for the selected episode on the right.
-  const all = (meta.videos || []).filter((v) => v.season != null && v.episode != null);
-  const regular = all.filter((v) => v.season > 0);
-  const episodes = (regular.length ? regular : all)
-    .map((v) => ({ vid: `${id}:${v.season}:${v.episode}`, season: v.season, episode: v.episode, title: v.name || v.title || `Episode ${v.episode}`, watched: !!meta.watched[`series:${id}:${v.season}:${v.episode}`] }))
-    .sort((a, b) => a.season - b.season || a.episode - b.episode);
+  const episodes = buildEpisodes(meta, id);
   const seasons = [...new Set(episodes.map((e) => e.season))];
   const resume = lib.continueWatching.find((c) => c.id === id && c.videoId);
   const start = episodes.find((e) => resume && e.vid === resume.videoId) || episodes.find((e) => !e.watched) || episodes[0];

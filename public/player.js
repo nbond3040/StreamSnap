@@ -144,7 +144,9 @@ const Player = (() => {
     lastSave = Date.now();
     const d = total(); if (!ctx || !d) return;
     const pos = ended ? d : cur();
-    api('/progress', { key: ctx.key, pos, dur: d, meta: ctx.meta }).catch(() => {});
+    // Remember which stream this was so Continue watching can reopen the same one.
+    const meta = { ...ctx.meta, stream: { filename: stream.filename, resolution: pick.resolution } };
+    api('/progress', { key: ctx.key, pos, dur: d, meta }).catch(() => {});
   }
 
   // ---------- quality ----------

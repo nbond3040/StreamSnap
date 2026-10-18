@@ -82,7 +82,7 @@ async function verifyAudio(picks, cfg, hidden) {
 }
 
 function resumePoint(p) {
-  return { pos: p && p.dur && p.pos > 30 && p.pos / p.dur < 0.9 ? p.pos : 0 };
+  return { pos: p && p.dur && p.pos > 10 && p.pos / p.dur < 0.9 ? p.pos : 0 };
 }
 
 const probes = new Map();
