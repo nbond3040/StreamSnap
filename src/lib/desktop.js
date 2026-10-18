@@ -24,7 +24,7 @@ Name=StreamSnap
 Comment=Stream movies and series via Torrentio and Real-Debrid
 Exec="${process.execPath}" "${script}"
 Icon=streamsnap
-StartupWMClass=StreamSnap
+StartupWMClass=streamsnap
 Terminal=false
 Categories=AudioVideo;Video;Player;
 `);

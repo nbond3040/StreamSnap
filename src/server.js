@@ -266,6 +266,21 @@ function createServer(port) {
         .map(([key, p]) => ({ key, pos: p.pos, dur: p.dur, ...p.meta }));
       return { library: data.library, continueWatching: cont, watched: data.watched };
     },
+    async 'POST /api/library/remove'(req) {
+      const { id } = await readBody(req);
+      const data = config.loadData();
+      data.library = data.library.filter((m) => m.id !== id);
+      config.saveData(data);
+      return { ok: true };
+    },
+    // "Continue watching" is derived from saved progress, so removing a title clears its progress entries.
+    async 'POST /api/continue/remove'(req) {
+      const { id } = await readBody(req);
+      const data = config.loadData();
+      for (const [key, p] of Object.entries(data.progress)) if (p.meta && p.meta.id === id) delete data.progress[key];
+      config.saveData(data);
+      return { ok: true };
+    },
     async 'POST /api/library'(req) {
       const { id, type, name, poster } = await readBody(req);
       if (!/^tt\d+$/.test(id || '')) throw new HttpError(400, 'bad id');

@@ -12,7 +12,8 @@ const SMOKE = process.argv.includes('--smoke-test');
 const ICON = path.join(__dirname, '..', 'public', 'icons', '512.png');
 
 app.setName('StreamSnap');
-app.setDesktopName('streamsnap.desktop'); // lets the desktop match the window to the menu entry and icon
+app.setDesktopName('streamsnap.desktop');
+app.commandLine.appendSwitch('class', 'streamsnap'); // lets the desktop match the window to the menu entry and icon
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // Hardware video decoding on Linux; software decoding of big 1080p/4K files is what makes video lag behind audio.
 app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiVideoDecodeLinuxGL,VaapiIgnoreDriverChecks');

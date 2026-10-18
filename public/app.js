@@ -35,16 +35,20 @@ const resLabel = (r) => (r === '2160p' ? '4K' : r);
 const RES_ORDER = ['2160p', '1440p', '1080p', '720p', '576p', '480p', '360p'];
 
 // ---------- cards ----------
-function card(m, prog) {
+function card(m, prog, onRemove) {
   const id = m.id || m.imdb_id;
   const c = h('a', { class: 'card', href: `#/detail/${m.type}/${id}` },
     h('div', { class: 'img', style: m.poster ? `background-image:url("${encodeURI(m.poster)}")` : '' },
       m.imdbRating && h('span', { class: 'rate' }, '★ ' + m.imdbRating)),
     h('div', { class: 't' }, m.name, (m.releaseInfo || m.year || m.season) && h('small', {}, m.season ? `S${m.season} E${m.episode}` : m.releaseInfo || m.year)));
+  if (onRemove) {
+    const x = h('button', { class: 'rm', title: 'Remove', 'aria-label': 'Remove', onclick: (e) => { e.preventDefault(); e.stopPropagation(); onRemove(c); } });
+    setIcon(x, 'close'); c.append(x);
+  }
   if (prog && prog.dur) c.append(h('div', { class: 'prog' }, h('i', { style: `width:${Math.min(100, (prog.pos / prog.dur) * 100)}%` })));
   return c;
 }
-const scroller = (items, prog) => h('div', { class: 'scroller' }, items.map((m) => card(m, prog && prog(m))));
+const scroller = (items, prog, onRemove) => h('div', { class: 'scroller' }, items.map((m) => card(m, prog && prog(m), onRemove)));
 const skeletons = (n = 8) => h('div', { class: 'scroller' }, Array.from({ length: n }, () => h('div', { class: 'skel' })));
 const section = (title, body) => [h('h2', { class: 'sec' }, title), body];
 
@@ -64,7 +68,10 @@ async function home() {
   }
   if (lib.continueWatching.length) {
     const byId = new Map(lib.continueWatching.map((c) => [c.id, c]));
-    out.push(...section('Continue watching', scroller(lib.continueWatching.map((c) => ({ ...c, name: c.name })), (m) => byId.get(m.id))));
+    const remove = async (el) => { await api('/continue/remove', { id: el.dataset.id }); const row = el.parentElement; el.remove(); if (!row.children.length) { row.previousElementSibling.remove(); row.remove(); } };
+    const list = scroller(lib.continueWatching.map((c) => ({ ...c, name: c.name })), (m) => byId.get(m.id), remove);
+    [...list.children].forEach((el, i) => { el.dataset.id = lib.continueWatching[i].id; });
+    out.push(...section('Continue watching', list));
   }
   out.push(...section('Popular movies', scroller(movies)), ...section('Popular series', scroller(series)));
   view.replaceChildren(...out);
@@ -101,8 +108,11 @@ async function searchView(q) {
 
 async function libraryView() {
   const lib = await api('/library');
-  view.replaceChildren(...section('My library', lib.library.length ? h('div', { class: 'grid' }, lib.library.map((x) => card(x)))
-    : h('div', { class: 'empty' }, 'Nothing saved yet. Open a title and press “Add to library”.')));
+  const empty = () => h('div', { class: 'empty' }, 'Nothing saved yet. Open a title and press “+ Library”.');
+  const grid = h('div', { class: 'grid' });
+  const remove = async (el) => { await api('/library/remove', { id: el.dataset.id }); el.remove(); if (!grid.children.length) grid.replaceWith(empty()); };
+  grid.append(...lib.library.map((x) => { const c = card(x, null, remove); c.dataset.id = x.id; return c; }));
+  view.replaceChildren(...section('My library', lib.library.length ? grid : empty()));
 }
 
 // ---------- detail ----------
