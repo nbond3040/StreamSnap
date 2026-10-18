@@ -46,7 +46,7 @@ function runElectron() {
   const main = path.join(__dirname, '..', 'desktop', 'main.cjs');
   const launch = (extra) => {
     const started = Date.now();
-    const child = spawn(electron, ['--class=streamsnap', ...extra, main], { stdio: 'inherit', env: { ...process.env, STREAMSNAP_PORT: String(port) } });
+    const child = spawn(electron, ['--class=streamsnap', ...extra, main], { stdio: process.stdout.isTTY || process.env.STREAMSNAP_LOG ? 'inherit' : ['ignore', 'inherit', 'inherit'], env: { ...process.env, STREAMSNAP_PORT: String(port) } });
     child.on('exit', (code, signal) => {
       if ((code || signal) && Date.now() - started < 8000 && !extra.length) return launch(['--no-sandbox']); // userns/SUID sandbox unavailable
       process.exit(code || 0);
