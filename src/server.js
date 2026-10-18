@@ -257,7 +257,8 @@ function createServer(port) {
       try { return await subtitles.listSubtitles(q.get('type'), q.get('id'), cfg.nativeLanguage); } catch { return []; }
     },
     async 'GET /api/resume'(req, q) {
-      return resumePoint(config.loadData().progress[q.get('key')]);
+      const p = config.loadData().progress[q.get('key')];
+      return { ...resumePoint(p), stream: (p && p.meta && p.meta.stream) || null };
     },
     async 'GET /api/probe'(req, q) {
       const ref = q.get('ref');

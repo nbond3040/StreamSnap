@@ -40,9 +40,11 @@ const RES_ORDER = ['2160p', '1440p', '1080p', '720p', '576p', '480p', '360p'];
 // ---------- cards ----------
 function card(m, prog, onRemove, onOpen) {
   const id = m.id || m.imdb_id;
+  const play = h('button', { class: 'playbtn', title: 'Play', 'aria-label': `Play ${m.name}`, onclick: (e) => { e.preventDefault(); e.stopPropagation(); (onOpen || quickPlay)(m); } });
+  setIcon(play, 'play');
   const c = h('a', { class: 'card', href: `#/detail/${m.type}/${id}` },
     h('div', { class: 'img', style: m.poster ? `background-image:url("${encodeURI(m.poster)}")` : '' },
-      m.imdbRating && h('span', { class: 'rate' }, '★ ' + m.imdbRating)),
+      m.imdbRating && h('span', { class: 'rate' }, '★ ' + m.imdbRating), play),
     h('div', { class: 't' }, m.name, (m.releaseInfo || m.year || m.season) && h('small', {}, m.season ? `S${m.season} E${m.episode}` : m.releaseInfo || m.year)));
   if (onRemove) {
     const x = h('button', { class: 'rm', title: 'Remove', 'aria-label': 'Remove', onclick: (e) => { e.preventDefault(); e.stopPropagation(); onRemove(c); } });
@@ -236,11 +238,14 @@ function startEpisode(meta, episodes) {
   return episodes.find((e) => !e.watched) || episodes[0];
 }
 
+/** Play button on a cover: straight into playback with no detail page (best stream, or where you left off). */
+const quickPlay = (m) => resumeWatching({ id: m.id || m.imdb_id, type: m.type, name: m.name, poster: m.poster });
+
 /** Continue watching: reopen the same stream (or the closest match) at the saved position. */
 async function resumeWatching(item) {
   const detailHash = `#/detail/${item.type}/${item.id}`;
   const base = { id: item.id, type: item.type, name: item.name, poster: item.poster };
-  toast('Resuming…');
+  toast(item.pos ? 'Resuming…' : 'Finding the best stream…');
   try {
     const cfg = await api('/config');
     let ctx;
@@ -253,7 +258,7 @@ async function resumeWatching(item) {
       ctx = await buildContext(base, ep.vid, ep, episodes);
     } else ctx = await buildContext(base, item.id, null);
     if (!ctx.picks.length) { toast('No streams available right now'); location.hash = detailHash; return; }
-    const saved = item.stream || {};
+    const saved = item.stream || (await api('/resume?key=' + encodeURIComponent(ctx.key)).catch(() => ({}))).stream || {};
     let res = ctx.picks.some((p) => p.resolution === saved.resolution) ? saved.resolution : bestPick(ctx, cfg.preferredResolution);
     for (const p of ctx.picks) { // prefer the exact release that was playing
       const hit = [p.stream, ...p.alternatives].find((s) => saved.filename && s.filename === saved.filename);
