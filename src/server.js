@@ -81,6 +81,16 @@ async function verifyAudio(picks, cfg, hidden) {
   }).filter(Boolean);
 }
 
+/** Titles saved before genres were recorded get them from Cinemeta once, then they're stored with the entry. */
+async function backfillGenres(data) {
+  const missing = data.library.filter((m) => !Array.isArray(m.genres));
+  if (!missing.length) return;
+  await Promise.all(missing.map(async (m) => {
+    try { const meta = await cinemeta.meta(m.type, m.id); m.genres = (meta && meta.genres) || []; } catch { /* offline: try again next time */ }
+  }));
+  if (missing.some((m) => Array.isArray(m.genres))) config.saveData(data);
+}
+
 /** Continue watching: the latest unfinished item per title, plus titles the user pinned by hand. */
 function continueList(data) {
   const items = new Map();
@@ -276,6 +286,7 @@ function createServer(port) {
     async 'GET /api/library'() {
       const data = config.loadData();
       const cont = continueList(data);
+      await backfillGenres(data);
       return { library: data.library, continueWatching: cont, watched: data.watched };
     },
     async 'POST /api/library/remove'(req) {
@@ -304,11 +315,12 @@ function createServer(port) {
       return { ok: true };
     },
     async 'POST /api/library'(req) {
-      const { id, type, name, poster } = await readBody(req);
+      const { id, type, name, poster, genres } = await readBody(req);
       if (!/^tt\d+$/.test(id || '')) throw new HttpError(400, 'bad id');
       const data = config.loadData();
       const i = data.library.findIndex((m) => m.id === id);
-      if (i >= 0) data.library.splice(i, 1); else data.library.unshift({ id, type, name, poster });
+      const clean = Array.isArray(genres) ? genres.filter((g) => typeof g === 'string').slice(0, 8) : [];
+      if (i >= 0) data.library.splice(i, 1); else data.library.unshift({ id, type, name, poster, genres: clean });
       config.saveData(data);
       return { inLibrary: i < 0 };
     },

@@ -180,3 +180,6 @@ video::-internal-media-controls-overlay-cast-button { display:none; }
 
 .card .rm.info { left:auto; right:8px; top:8px; text-decoration:none; }
 .card:has(.rate) .rm.info { top:38px; }
+
+h3.grp { font-size:15px; font-weight:600; color:var(--dim); margin:22px 0 10px; text-transform:uppercase; letter-spacing:.6px; }
+.count { margin-left:10px; font-size:12px; font-weight:500; color:var(--dim); background:var(--s2); padding:1px 9px; border-radius:999px; vertical-align:middle; }

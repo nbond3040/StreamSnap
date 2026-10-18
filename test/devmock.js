@@ -9,10 +9,10 @@ const port = Number(process.argv[2] || 7990);
 const dir = process.env.MOCK_VIDEO_DIR || __dirname;
 const self = `http://127.0.0.1:${port}`;
 const posters = (n) => ({ poster: '', background: '', description: `Mock description for ${n}.`, imdbRating: '8.1', releaseInfo: '2024', genres: ['Drama'] });
-const movie = { id: 'tt0000001', imdb_id: 'tt0000001', type: 'movie', name: 'Mock Movie', ...posters('movie'), runtime: '30 s' };
+const movie = { id: 'tt0000001', imdb_id: 'tt0000001', type: 'movie', name: 'Mock Movie', ...posters('movie'), genres: ['Action', 'Drama'], runtime: '30 s' };
 const videos = [];
 for (const [s, n] of [[1, 3], [2, 2]]) for (let e = 1; e <= n; e++) videos.push({ season: s, episode: e, name: `Episode ${s}.${e}` });
-const series = { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Mock Series', ...posters('series'), videos };
+const series = { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Mock Series', ...posters('series'), genres: ['Comedy'], videos };
 
 const stream = (res, label, file, extra = '') => ({
   name: `[RD+] Torrentio\n${res}`,

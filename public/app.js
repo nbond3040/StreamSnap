@@ -112,12 +112,51 @@ async function searchView(q) {
 }
 
 async function libraryView() {
-  const lib = await api('/library');
-  const empty = () => h('div', { class: 'empty' }, 'Nothing saved yet. Open a title and press “+ Library”.');
-  const grid = h('div', { class: 'grid' });
-  const remove = async (el) => { await api('/library/remove', { id: el.dataset.id }); el.remove(); if (!grid.children.length) grid.replaceWith(empty()); };
-  grid.append(...lib.library.map((x) => { const c = card(x, null, remove); c.dataset.id = x.id; return c; }));
-  view.replaceChildren(...section('My library', lib.library.length ? grid : empty()));
+  const { library } = await api('/library');
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('ss.libraryFilter')) || {}; } catch { return {}; } })();
+  let type = ['movie', 'series'].includes(saved.type) ? saved.type : 'all', genre = saved.genre || '';
+  const items = [...library];
+  const body = h('div');
+  const genresFor = (t) => [...new Set(items.filter((m) => t === 'all' || m.type === t).flatMap((m) => m.genres || []))].sort();
+  const seg = h('div', { class: 'seg' });
+  const sel = h('select', { class: 'pill', onchange: () => { genre = sel.value; render(); } });
+
+  async function remove(el) {
+    await api('/library/remove', { id: el.dataset.id });
+    items.splice(items.findIndex((m) => m.id === el.dataset.id), 1);
+    render();
+  }
+  const gridOf = (list) => h('div', { class: 'grid' }, list.map((x) => { const c = card(x, null, remove); c.dataset.id = x.id; return c; }));
+
+  function render() {
+    try { localStorage.setItem('ss.libraryFilter', JSON.stringify({ type, genre })); } catch { /* optional */ }
+    seg.replaceChildren(...[['all', 'All'], ['movie', 'Movies'], ['series', 'Series']].map(([v, label]) =>
+      h('button', { class: type === v ? 'on' : '', onclick: () => { type = v; render(); } }, label)));
+    const genres = genresFor(type);
+    if (genre && !genres.includes(genre)) genre = '';
+    sel.replaceChildren(h('option', { value: '' }, 'All genres'), ...genres.map((g) => h('option', { value: g, selected: g === genre }, g)));
+    sel.hidden = !genres.length;
+
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    const out = [];
+    // Sorted by type first (movies, then series), then by genre.
+    for (const t of type === 'all' ? ['movie', 'series'] : [type]) {
+      const list = items.filter((m) => m.type === t && (!genre || (m.genres || []).includes(genre))).sort(byName);
+      if (!list.length) continue;
+      if (type === 'all') out.push(h('h2', { class: 'sec' }, t === 'movie' ? 'Movies' : 'Series', h('span', { class: 'count' }, list.length)));
+      if (genre) { out.push(gridOf(list)); continue; }
+      const groups = new Map();
+      for (const m of list) { const g = (m.genres || [])[0] || 'Other'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(m); }
+      const names = [...groups.keys()].sort((a, b) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
+      for (const g of names) {
+        if (names.length > 1) out.push(h('h3', { class: 'grp' }, g, h('span', { class: 'count' }, groups.get(g).length)));
+        out.push(gridOf(groups.get(g)));
+      }
+    }
+    body.replaceChildren(...(out.length ? out : [h('div', { class: 'empty' }, items.length ? 'Nothing matches those filters.' : 'Nothing saved yet. Open a title and press “+ Library”.')]));
+  }
+  view.replaceChildren(h('h2', { class: 'sec' }, 'My library'), h('div', { class: 'filters' }, seg, sel), body);
+  render();
 }
 
 // ---------- detail ----------
@@ -218,7 +257,7 @@ async function resumeWatching(item) {
 async function detail(type, id) {
   view.replaceChildren(h('div', { class: 'empty', style: 'margin-top:40px' }, 'Loading…'));
   const [meta, cfg] = await Promise.all([api(`/meta?type=${type}&id=${id}`), api('/config')]);
-  const base = { id, type, name: meta.name, poster: meta.poster };
+  const base = { id, type, name: meta.name, poster: meta.poster, genres: meta.genres || [] };
   const streamsBox = h('div');
   const playBtn = h('button', { class: 'btn', disabled: true }, 'Finding streams…');
   const libBtn = h('button', { class: 'btn ghost' }, meta.inLibrary ? '✓ In library' : '+ Library');
