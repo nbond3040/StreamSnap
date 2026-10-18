@@ -210,6 +210,9 @@ function createServer(port) {
       const data = config.loadData();
       meta.inLibrary = data.library.some((m) => m.id === meta.imdb_id);
       meta.watched = data.watched;
+      // Most recently touched episode of this series, so the page can reopen where the user left off.
+      const last = Object.values(data.progress).filter((p) => p.meta && p.meta.id === meta.imdb_id && p.meta.videoId).sort((a, b) => b.at - a.at)[0];
+      if (last) meta.lastWatched = { videoId: last.meta.videoId, finished: last.dur > 0 && last.pos / last.dur > 0.9 };
       return meta;
     },
     async 'GET /api/streams'(req, q) {

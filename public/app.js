@@ -207,7 +207,7 @@ async function resumeWatching(item) {
 
 async function detail(type, id) {
   view.replaceChildren(h('div', { class: 'empty', style: 'margin-top:40px' }, 'Loading…'));
-  const [meta, cfg, lib] = await Promise.all([api(`/meta?type=${type}&id=${id}`), api('/config'), api('/library')]);
+  const [meta, cfg] = await Promise.all([api(`/meta?type=${type}&id=${id}`), api('/config')]);
   const base = { id, type, name: meta.name, poster: meta.poster };
   const streamsBox = h('div');
   const playBtn = h('button', { class: 'btn', disabled: true }, 'Finding streams…');
@@ -244,8 +244,11 @@ async function detail(type, id) {
   // Series: episode list on the left, streams for the selected episode on the right.
   const episodes = buildEpisodes(meta, id);
   const seasons = [...new Set(episodes.map((e) => e.season))];
-  const resume = lib.continueWatching.find((c) => c.id === id && c.videoId);
-  const start = episodes.find((e) => resume && e.vid === resume.videoId) || episodes.find((e) => !e.watched) || episodes[0];
+  // Reopen where the user left off: the episode in progress, or the one after the last one they finished.
+  let start;
+  const last = meta.lastWatched, li = last ? episodes.findIndex((e) => e.vid === last.videoId) : -1;
+  if (li >= 0) start = last.finished ? episodes[li + 1] || episodes[li] : episodes[li];
+  start = start || episodes.find((e) => !e.watched) || episodes[0];
 
   const epBox = h('div', { class: 'eps' });
   const sSel = h('select', { class: 'pill', onchange: () => drawEps() }, seasons.map((s) => h('option', { value: s }, s === 0 ? 'Specials' : `Season ${s}`)));
