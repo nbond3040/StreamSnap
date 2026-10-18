@@ -268,6 +268,21 @@ async function resumeWatching(item) {
   } catch (e) { toast(e.message); location.hash = detailHash; }
 }
 
+/** "More in this collection": sequels, prequels and spin-offs from TMDB's franchise data (needs a TMDB key). */
+async function loadCollection(box, id) {
+  try {
+    const c = await api('/collection?id=' + id);
+    if (!c.parts || c.parts.length < 2) return;
+    const here = c.parts.findIndex((p) => p.id === id);
+    const cards = c.parts.map((p, i) => {
+      const el = card({ id: p.id, type: 'movie', name: p.name, poster: p.poster, releaseInfo: [p.year, i === here + 1 && 'Next'].filter(Boolean).join(' · ') });
+      if (p.id === id) { el.classList.add('current'); el.removeAttribute('href'); el.title = 'You are here'; el.querySelector('.playbtn')?.remove(); }
+      return el;
+    });
+    box.replaceChildren(h('h2', { class: 'sec' }, c.name, h('span', { class: 'count' }, `${c.parts.length} films`)), h('div', { class: 'scroller' }, cards));
+  } catch { /* the collection row is a bonus; stay quiet on failure */ }
+}
+
 async function detail(type, id) {
   view.replaceChildren(h('div', { class: 'empty', style: 'margin-top:40px' }, 'Loading…'));
   const [meta, cfg] = await Promise.all([api(`/meta?type=${type}&id=${id}`), api('/config')]);
@@ -306,7 +321,9 @@ async function detail(type, id) {
   const fail = (e) => { streamsBox.replaceChildren(showErr(e)); playBtn.textContent = 'Unavailable'; };
 
   if (type === 'movie') {
-    view.replaceChildren(hero, h('div', { style: 'margin-top:24px' }, streamsBox));
+    const collBox = h('div');
+    view.replaceChildren(hero, h('div', { style: 'margin-top:24px' }, streamsBox), collBox);
+    loadCollection(collBox, id);
     streamsBox.replaceChildren(h('div', { class: 'panel' }, h('div', { class: 'skel', style: 'aspect-ratio:auto;height:90px;flex:none' })));
     buildContext(base, id, null).then(ready, fail);
     return;
@@ -352,6 +369,9 @@ async function settings() {
   f.append(
     h('div', { class: 'card2' }, h('h2', {}, 'Accounts'),
       field(`Real-Debrid API key${cfg.hasRealDebridKey ? ` — saved (ends ${cfg.realDebridKeyHint})` : ''}`, text('realDebridKey', 'password', cfg.hasRealDebridKey ? 'Leave blank to keep the saved key' : 'real-debrid.com/apitoken'), 'Stored only on this computer.'),
+      field(`TMDB API key (optional)${cfg.hasTmdbKey ? ' — saved' : ''}`, text('tmdbKey', 'password', cfg.hasTmdbKey ? 'Leave blank to keep the saved key' : 'themoviedb.org/settings/api'),
+        'Adds a "collection" row to movie pages linking sequels, prequels and spin-offs. A free TMDB account gives you a key.'),
+      cfg.hasTmdbKey && check('clearTmdbKey', 'Remove the saved TMDB key'),
       field('Torrentio config URL (optional)', text('torrentioUrl', 'text', 'https://torrentio.strem.fun/…/manifest.json'), 'Torrentio has no separate API key. Leave blank to use the defaults.')),
     h('div', { class: 'card2' }, h('h2', {}, 'Streams'),
       field('Native language', select('nativeLanguage', info.languages), 'Only streams with this audio are chosen.'),

@@ -27,6 +27,11 @@ http.createServer((req, res) => {
   let m;
   if (/^\/catalog\/movie\/.*boom/.test(u.pathname)) { res.writeHead(504); return res.end(); } // simulate a Cinemeta gateway timeout
   if (/^\/catalog\/(movie|series)\//.test(u.pathname)) return json({ metas: [movie, series] });
+  // TMDB stand-in: tt0000001 belongs to a 3-film collection
+  if (u.pathname.startsWith('/3/find/')) return json({ movie_results: u.pathname.endsWith('tt0000001') ? [{ id: 100 }] : [] });
+  if (u.pathname === '/3/movie/100') return json({ belongs_to_collection: { id: 9, name: 'Mock Collection' } });
+  if (u.pathname === '/3/collection/9') return json({ name: 'Mock Collection', parts: [{ id: 102, title: 'Mock Movie 3', release_date: '2026-05-01', poster_path: null }, { id: 100, title: 'Mock Movie', release_date: '2024-05-01', poster_path: null }, { id: 101, title: 'Mock Movie 2', release_date: '2025-05-01', poster_path: null }] });
+  if ((m = /^\/3\/movie\/(\d+)\/external_ids$/.exec(u.pathname))) return json({ imdb_id: 'tt0000' + m[1] });
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });
   if (/\/stream\//.test(u.pathname)) {

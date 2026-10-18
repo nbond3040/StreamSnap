@@ -24,6 +24,7 @@ Open Settings and enter your Real-Debrid API key (https://real-debrid.com/apitok
 - Built-in player: switch quality mid-playback (swaps the underlying stream and keeps your position), captions off by default with a CC menu, a "Next episode" button in the last minute or so, and an episode/season sidebar
 - Optional external playback in mpv or VLC
 - Audio verification: with ffmpeg installed, candidates whose audio tracks are all in another language are dropped
+- Movie pages list the rest of their franchise (sequels, prequels, spin-offs) when you add a free TMDB API key in Settings
 - Subtitles in your language (OpenSubtitles addon), library, continue-watching with resume, watched marks
 - Keys stay on the server and in `~/.config/streamsnap/config.json` (mode 0600); the browser never sees them
 

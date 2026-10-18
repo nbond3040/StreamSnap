@@ -16,6 +16,7 @@ function systemLanguage() {
 
 const DEFAULTS = {
   realDebridKey: '',
+  tmdbKey: '',                 // optional: enables "More in this collection" (sequels) on movie pages
   torrentioUrl: '',            // optional: a full Torrentio manifest/config URL
   nativeLanguage: systemLanguage(),
   includeMultiAudio: true,     // accept releases tagged multi/dual audio

@@ -8,6 +8,7 @@ const config = require('./lib/config');
 const cinemeta = require('./lib/cinemeta');
 const torrentio = require('./lib/torrentio');
 const subtitles = require('./lib/subtitles');
+const tmdb = require('./lib/tmdb');
 const player = require('./lib/player');
 const { selectStreams } = require('./lib/select');
 const { LANGS, tagMatches, isUnknownTag } = require('./lib/language');
@@ -37,8 +38,8 @@ async function resolveFinal(ref) {
 }
 
 function redacted(cfg) {
-  const { realDebridKey, ...rest } = cfg;
-  return { ...rest, hasRealDebridKey: !!realDebridKey, realDebridKeyHint: realDebridKey ? `…${realDebridKey.slice(-4)}` : '' };
+  const { realDebridKey, tmdbKey, ...rest } = cfg;
+  return { ...rest, hasRealDebridKey: !!realDebridKey, realDebridKeyHint: realDebridKey ? `…${realDebridKey.slice(-4)}` : '', hasTmdbKey: !!tmdbKey };
 }
 
 const publicStream = (s) => ({
@@ -216,7 +217,8 @@ function createServer(port) {
     async 'POST /api/config'(req) {
       const body = await readBody(req);
       if (body.realDebridKey === '' && body.keepKey) delete body.realDebridKey;
-      delete body.keepKey;
+      if (body.tmdbKey === '' && !body.clearTmdbKey) delete body.tmdbKey; // blank means keep the saved key
+      delete body.keepKey; delete body.clearTmdbKey;
       return redacted(config.saveConfig(body));
     },
     async 'GET /api/info'() {
@@ -236,6 +238,13 @@ function createServer(port) {
       const last = Object.values(data.progress).filter((p) => p.meta && p.meta.id === meta.imdb_id && p.meta.videoId).sort((a, b) => b.at - a.at)[0];
       if (last) meta.lastWatched = { videoId: last.meta.videoId, finished: last.dur > 0 && last.pos / last.dur > 0.9 };
       return meta;
+    },
+    // Other films in the same franchise (needs a TMDB key); never an error page, just "nothing to show".
+    async 'GET /api/collection'(req, q) {
+      const key = config.loadConfig().tmdbKey;
+      if (!key) return { needsKey: true };
+      try { return (await tmdb.collectionFor(q.get('id'), key)) || { parts: [] }; }
+      catch (e) { return { parts: [], error: e.message }; }
     },
     async 'GET /api/streams'(req, q) {
       const cfg = config.loadConfig();
