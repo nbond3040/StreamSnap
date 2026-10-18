@@ -183,3 +183,5 @@ video::-internal-media-controls-overlay-cast-button { display:none; }
 
 h3.grp { font-size:15px; font-weight:600; color:var(--dim); margin:22px 0 10px; text-transform:uppercase; letter-spacing:.6px; }
 .count { margin-left:10px; font-size:12px; font-weight:500; color:var(--dim); background:var(--s2); padding:1px 9px; border-radius:999px; vertical-align:middle; }
+
+.err.retry { display:flex; align-items:center; justify-content:space-between; gap:16px; }

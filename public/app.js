@@ -31,6 +31,9 @@ function toast(msg) {
 
 const fmtSize = (b) => (b ? (b / 1e9 >= 1 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB') : '');
 const showErr = (e) => h('div', { class: 'err' }, e.message || String(e));
+/** Inline error with a Retry button, so one failed lookup doesn't take the whole page down. */
+const retryBox = (e, retry) => h('div', { class: 'err retry' }, h('span', {}, (e && e.message) || 'Something went wrong.'), h('button', { class: 'btn sm ghost', onclick: retry }, 'Retry'));
+const settled = (results, i) => (results[i].status === 'fulfilled' ? { value: results[i].value } : { error: results[i].reason });
 const resLabel = (r) => (r === '2160p' ? '4K' : r);
 const RES_ORDER = ['2160p', '1440p', '1080p', '720p', '576p', '480p', '360p'];
 
@@ -60,7 +63,11 @@ const section = (title, body) => [h('h2', { class: 'sec' }, title), body];
 // ---------- views ----------
 async function home() {
   view.replaceChildren(h('div', { style: 'height:360px' }), ...section('Popular movies', skeletons()));
-  const [lib, movies, series, cfg] = await Promise.all([api('/library'), api('/catalog?type=movie'), api('/catalog?type=series'), api('/config')]);
+  const [libR, moviesR, seriesR, cfgR] = await Promise.allSettled([api('/library'), api('/catalog?type=movie'), api('/catalog?type=series'), api('/config')]);
+  const lib = libR.status === 'fulfilled' ? libR.value : { continueWatching: [] };
+  const cfg = cfgR.status === 'fulfilled' ? cfgR.value : { hasRealDebridKey: true };
+  const movies = moviesR.status === 'fulfilled' ? moviesR.value : [];
+  const series = seriesR.status === 'fulfilled' ? seriesR.value : [];
   const out = [];
   const feat = movies.find((m) => m.background && m.description) || movies[0];
   if (feat) out.push(h('div', { class: 'hero', style: feat.background ? `background-image:url("${encodeURI(feat.background)}")` : '' },
@@ -78,7 +85,8 @@ async function home() {
     [...list.children].forEach((el, i) => { el.dataset.id = lib.continueWatching[i].id; });
     out.push(...section('Continue watching', list));
   }
-  out.push(...section('Popular movies', scroller(movies)), ...section('Popular series', scroller(series)));
+  const row = (title, r, items) => section(title, r.status === 'fulfilled' ? scroller(items) : retryBox(r.reason, () => home()));
+  out.push(...row('Popular movies', moviesR, movies), ...row('Popular series', seriesR, series));
   view.replaceChildren(...out);
 }
 
@@ -106,9 +114,10 @@ async function discover(type) {
 
 async function searchView(q) {
   view.replaceChildren(...section(`Results for “${q}”`, skeletons()));
-  const [m, s] = await Promise.all([api(`/catalog?type=movie&q=${encodeURIComponent(q)}`), api(`/catalog?type=series&q=${encodeURIComponent(q)}`)]);
-  view.replaceChildren(...section(`Movies for “${q}”`, m.length ? h('div', { class: 'grid' }, m.map((x) => card(x))) : h('div', { class: 'empty' }, 'No movies found.')),
-    ...section('Series', s.length ? h('div', { class: 'grid' }, s.map((x) => card(x))) : h('div', { class: 'empty' }, 'No series found.')));
+  const results = await Promise.allSettled([api(`/catalog?type=movie&q=${encodeURIComponent(q)}`), api(`/catalog?type=series&q=${encodeURIComponent(q)}`)]);
+  const part = (title, r, noun) => section(title, r.error ? retryBox(r.error, () => searchView(q))
+    : r.value.length ? h('div', { class: 'grid' }, r.value.map((x) => card(x))) : h('div', { class: 'empty' }, `No ${noun} found.`));
+  view.replaceChildren(...part(`Movies for “${q}”`, settled(results, 0), 'movies'), ...part('Series', settled(results, 1), 'series'));
 }
 
 async function libraryView() {

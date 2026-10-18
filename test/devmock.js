@@ -25,6 +25,7 @@ http.createServer((req, res) => {
   const json = (o) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
   const u = new URL(req.url, self);
   let m;
+  if (/^\/catalog\/movie\/.*boom/.test(u.pathname)) { res.writeHead(504); return res.end(); } // simulate a Cinemeta gateway timeout
   if (/^\/catalog\/(movie|series)\//.test(u.pathname)) return json({ metas: [movie, series] });
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });
