@@ -9,6 +9,8 @@ const cinemeta = require('./lib/cinemeta');
 const torrentio = require('./lib/torrentio');
 const subtitles = require('./lib/subtitles');
 const tmdb = require('./lib/tmdb');
+const xtream = require('./lib/xtream');
+const live = require('./lib/live');
 const player = require('./lib/player');
 const { selectStreams } = require('./lib/select');
 const { LANGS, tagMatches, isUnknownTag, detectLanguages } = require('./lib/language');
@@ -38,8 +40,8 @@ async function resolveFinal(ref) {
 }
 
 function redacted(cfg) {
-  const { realDebridKey, tmdbKey, ...rest } = cfg;
-  return { ...rest, hasRealDebridKey: !!realDebridKey, realDebridKeyHint: realDebridKey ? `…${realDebridKey.slice(-4)}` : '', hasTmdbKey: !!tmdbKey };
+  const { realDebridKey, tmdbKey, xtreamPass, ...rest } = cfg;
+  return { ...rest, hasXtreamPass: !!xtreamPass, hasRealDebridKey: !!realDebridKey, realDebridKeyHint: realDebridKey ? `…${realDebridKey.slice(-4)}` : '', hasTmdbKey: !!tmdbKey };
 }
 
 const publicStream = (s) => ({
@@ -218,6 +220,8 @@ function createServer(port) {
       const body = await readBody(req);
       if (body.realDebridKey === '' && body.keepKey) delete body.realDebridKey;
       if (body.tmdbKey === '' && !body.clearTmdbKey) delete body.tmdbKey; // blank means keep the saved key
+      if (body.xtreamUrl === '') body.xtreamPass = '';                          // removing the server clears the login too
+      else if (body.xtreamPass === '') delete body.xtreamPass;                  // blank means keep the saved password
       delete body.keepKey; delete body.clearTmdbKey;
       return redacted(config.saveConfig(body));
     },
@@ -245,6 +249,45 @@ function createServer(port) {
       if (!key) return { needsKey: true };
       try { return (await tmdb.collectionFor(q.get('id'), key)) || { parts: [] }; }
       catch (e) { return { parts: [], error: e.message }; }
+    },
+    // ---- Live TV (Xtream Codes) ----
+    async 'POST /api/live/test'(req) {
+      const b = await readBody(req), cfg = config.loadConfig();
+      try {
+        return await new xtream.Xtream({ url: b.url, user: b.user, pass: b.pass || cfg.xtreamPass }).account();
+      } catch (e) { throw new HttpError(400, e.message); }
+    },
+    async 'GET /api/live/browse'() {
+      const cfg = config.loadConfig();
+      if (!cfg.xtreamUrl || !cfg.xtreamUser || !cfg.xtreamPass) return { configured: false };
+      try {
+        const x = xtream.clientFor(cfg);
+        const [categories, channels] = await Promise.all([x.categories(), x.channels()]);
+        return { configured: true, categories, channels, favorites: config.loadData().liveFavorites || [] };
+      } catch (e) { throw new HttpError(502, e.message); }
+    },
+    // What's on now/next for a batch of channels (the page asks for the ones on screen).
+    async 'GET /api/live/epg'(req, q) {
+      const cfg = config.loadConfig();
+      const ids = [...new Set((q.get('ids') || '').split(',').map(Number).filter(Number.isInteger))].slice(0, 30);
+      const out = {};
+      if (!cfg.xtreamUrl || !ids.length) return out;
+      const x = xtream.clientFor(cfg);
+      let next = 0;
+      await Promise.all(Array.from({ length: 6 }, async () => {
+        while (next < ids.length) { const id = ids[next++]; try { out[id] = await x.epg(id); } catch { out[id] = []; } }
+      }));
+      return out;
+    },
+    async 'POST /api/live/favorite'(req) {
+      const id = Number((await readBody(req)).id);
+      if (!Number.isInteger(id)) throw new HttpError(400, 'bad channel');
+      const data = config.loadData();
+      const favs = new Set(data.liveFavorites || []);
+      favs.has(id) ? favs.delete(id) : favs.add(id);
+      data.liveFavorites = [...favs];
+      config.saveData(data);
+      return { favorites: data.liveFavorites };
     },
     async 'GET /api/streams'(req, q) {
       const cfg = config.loadConfig();
@@ -367,6 +410,11 @@ function createServer(port) {
       }
       let m;
       if ((m = /^\/api\/stream\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return proxyStream(req, res, m[1]);
+      if ((m = /^\/api\/live\/stream\/(\d+)$/.exec(url.pathname)) && req.method === 'GET') {
+        const cfg = config.loadConfig();
+        if (!cfg.xtreamUrl || !player.available().ffmpeg) throw new HttpError(400, player.available().ffmpeg ? 'Live TV isn\'t set up.' : 'Live TV needs ffmpeg (sudo dnf/apt install ffmpeg).');
+        return live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1]);
+      }
       if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0);
       if ((m = /^\/api\/sub\/([0-9a-f]{20})\.vtt$/.exec(url.pathname)) && req.method === 'GET') {
         const vtt = await subtitles.fetchVtt(m[1]);

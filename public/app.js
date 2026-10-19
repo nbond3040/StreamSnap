@@ -417,6 +417,16 @@ async function settings() {
   const check = (name, label, hint) => h('label', { class: 'check' }, h('input', { type: 'checkbox', name, checked: !!cfg[name] }), h('div', {}, h('div', {}, label), hint && h('small', { class: 'subtle' }, hint)));
   const select = (name, opts) => h('select', { name }, Object.entries(opts).map(([v, t]) => h('option', { value: v, selected: v === cfg[name] }, t)));
   const p = info.players;
+  const liveTest = h('span', { class: 'subtle' });
+  async function testLive() {
+    const v = (n) => f.elements[n].value;
+    liveTest.className = 'subtle'; liveTest.textContent = 'Testing…';
+    try {
+      const r = await api('/live/test', { url: v('xtreamUrl'), user: v('xtreamUser'), pass: v('xtreamPass') });
+      liveTest.className = 'subtle ok';
+      liveTest.textContent = `✓ Connected · ${r.status}` + (r.expires ? ` · expires ${new Date(r.expires).toLocaleDateString()}` : '') + (r.maxConnections ? ` · ${r.maxConnections} connection${r.maxConnections > 1 ? 's' : ''}` : '');
+    } catch (e) { liveTest.className = 'subtle bad'; liveTest.textContent = e.message; }
+  }
   const save = (patch) => api('/config', patch).catch((e) => toast(e.message));
   const modeSeg = h('div', { class: 'seg' });
   const swatches = h('div', { class: 'themes' });
@@ -446,6 +456,12 @@ async function settings() {
         'Adds a "collection" row to movie pages linking sequels, prequels and spin-offs. A free TMDB account gives you a key.'),
       cfg.hasTmdbKey && check('clearTmdbKey', 'Remove the saved TMDB key'),
       field('Torrentio config URL (optional)', text('torrentioUrl', 'text', 'https://torrentio.strem.fun/…/manifest.json'), 'Torrentio has no separate API key. Leave blank to use the defaults.')),
+    h('div', { class: 'card2' }, h('h2', {}, 'Live TV'),
+      h('p', { class: 'subtle', style: 'margin:0' }, 'Connect an Xtream Codes IPTV service to watch live channels. Leave the server blank to turn Live TV off.'),
+      field('Server URL', text('xtreamUrl', 'text', 'http://example.com:8080')),
+      field('Username', text('xtreamUser', 'text', '')),
+      field(`Password${cfg.hasXtreamPass ? ' — saved' : ''}`, text('xtreamPass', 'password', cfg.hasXtreamPass ? 'Leave blank to keep the saved password' : '')),
+      h('div', { class: 'row2' }, h('button', { type: 'button', class: 'btn ghost sm', onclick: testLive }, 'Test connection'), liveTest)),
     h('div', { class: 'card2' }, h('h2', {}, 'Streams'),
       field('Native language', select('nativeLanguage', info.languages), 'Only streams with this audio are chosen.'),
       field('Starting quality', select('preferredResolution', { '2160p': '4K', '1080p': '1080p', '720p': '720p', '480p': '480p' }), 'Used by the Play button. You can change it any time in the player.'),
@@ -489,6 +505,7 @@ async function route() {
     else if (page === 'discover') await discover(a === 'series' ? 'series' : 'movie');
     else if (page === 'search') await searchView(decodeURIComponent(a));
     else if (page === 'library') await libraryView();
+    else if (page === 'live') await Live.view();
     else if (page === 'detail') await detail(a, b);
     else if (page === 'settings') await settings();
   } catch (e) { view.replaceChildren(showErr(e)); }

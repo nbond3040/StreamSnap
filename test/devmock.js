@@ -32,6 +32,19 @@ http.createServer((req, res) => {
   if (u.pathname === '/3/movie/100') return json({ belongs_to_collection: { id: 9, name: 'Mock Collection' } });
   if (u.pathname === '/3/collection/9') return json({ name: 'Mock Collection', parts: [{ id: 102, title: 'Mock Movie 3', release_date: '2026-05-01', poster_path: null }, { id: 100, title: 'Mock Movie', release_date: '2024-05-01', poster_path: null }, { id: 101, title: 'Mock Movie 2', release_date: '2025-05-01', poster_path: null }] });
   if ((m = /^\/3\/movie\/(\d+)\/external_ids$/.exec(u.pathname))) return json({ imdb_id: 'tt0000' + m[1] });
+  // Xtream Codes stand-in (user "u", password "p")
+  if (u.pathname === '/player_api.php') {
+    const q = u.searchParams, act = q.get('action');
+    if (q.get('username') !== 'u' || q.get('password') !== 'p') return json({ user_info: { auth: 0 } });
+    if (!act) return json({ user_info: { auth: 1, status: 'Active', exp_date: String(Math.floor(Date.now() / 1000) + 86400 * 30), max_connections: '2' } });
+    if (act === 'get_live_categories') return json([{ category_id: '1', category_name: 'News' }, { category_id: '2', category_name: 'Sports' }, { category_id: '3', category_name: 'Movies' }]);
+    if (act === 'get_live_streams') return json(Array.from({ length: 12 }, (_, i) => ({ num: i + 1, name: ['News One', 'World News', 'Sports HD', 'Arena Sports', 'Movie Max', 'Cinema Classics', 'News Today', 'Sports Extra', 'Film Four', 'Kids Zone', 'Nature TV', 'Music Hits'][i], stream_id: 101 + i, stream_icon: '', category_id: String(i % 3 + 1) })));
+    if (act === 'get_short_epg') {
+      const b64 = (t) => Buffer.from(t).toString('base64'), now = Math.floor(Date.now() / 1000), id = q.get('stream_id');
+      return json({ epg_listings: [[-1200, 2400, 'Morning Show'], [2400, 6000, 'Evening News'], [6000, 9600, 'Late Movie']].map(([a, z, t]) => ({ title: b64(`${t} ${id}`), description: b64(`About ${t}.`), start_timestamp: String(now + a), stop_timestamp: String(now + z) })) });
+    }
+  }
+  if (/^\/live\/u\/p\/\d+\.ts$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'video/mp2t' }); return fs.createReadStream(path.join(dir, 'live.ts')).pipe(res); }
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
   if (u.pathname === '/meta/movie/tt0000003.json') return json({ meta: { ...movie, id: 'tt0000003', imdb_id: 'tt0000003', name: 'Only French' } });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });

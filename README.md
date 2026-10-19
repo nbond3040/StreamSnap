@@ -23,6 +23,7 @@ Open Settings and enter your Real-Debrid API key (https://real-debrid.com/apitok
 - Only Real-Debrid-cached streams by default (instant start); CAM/screener releases dropped; HDR policy; oversized-file penalty
 - Built-in player: switch quality mid-playback (swaps the underlying stream and keeps your position), captions off by default with a CC menu, a "Next episode" button in the last minute or so, and an episode/season sidebar
 - Seven colors, each in dark, light or system mode (Settings → Appearance), cover-art "+" to add to your library, and every available stream is shown (labelled with its audio language) when nothing exists in your language
+- Live TV (Settings → Live TV): connect an Xtream Codes IPTV service, browse channels by category, search, favorite, see what's on now, and channel-surf with ↑/↓. Needs ffmpeg; your login stays on the server side and never reaches the page
 - Optional external playback in mpv or VLC
 - Audio verification: with ffmpeg installed, candidates whose audio tracks are all in another language are dropped
 - Movie pages list the rest of their franchise (sequels, prequels, spin-offs) when you add a free TMDB API key in Settings

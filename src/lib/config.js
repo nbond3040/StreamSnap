@@ -16,6 +16,9 @@ function systemLanguage() {
 
 const DEFAULTS = {
   realDebridKey: '',
+  xtreamUrl: '',               // Live TV (Xtream Codes) server, e.g. http://host:8080
+  xtreamUser: '',
+  xtreamPass: '',
   tmdbKey: '',                 // optional: enables "More in this collection" (sequels) on movie pages
   torrentioUrl: '',            // optional: a full Torrentio manifest/config URL
   nativeLanguage: systemLanguage(),
@@ -61,7 +64,7 @@ function saveConfig(patch) {
   return next;
 }
 
-const DATA_DEFAULTS = { library: [], progress: {}, watched: {}, pinned: [] };
+const DATA_DEFAULTS = { library: [], progress: {}, watched: {}, pinned: [], liveFavorites: [] };
 function loadData() { return { ...DATA_DEFAULTS, ...readJson(dataFile, {}) }; }
 function saveData(data) { writeJson(dataFile, data); }
 
