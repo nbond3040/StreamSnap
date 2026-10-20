@@ -439,3 +439,7 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 .lg-bar input[type=search] { flex:1 1 9em; min-width:8em; background:rgba(255,255,255,.1); border:1px solid transparent; color:#fff; border-radius:999px; padding:.4em 1em; outline:0; font-size:.92em; }
 .lg-bar input[type=search]:focus { border-color:var(--accent); }
 #lpGuide .dd-menu { z-index:70; }
+
+#pSkip { position:absolute; right:28px; bottom:130px; z-index:4; background:rgba(20,20,30,.92); color:#fff; border:1px solid rgba(255,255,255,.3); border-radius:12px; padding:12px 22px; font-weight:700; box-shadow:0 8px 30px #000a; animation:pop .25s; backdrop-filter:blur(8px); }
+#pSkip:hover { background:var(--accent); border-color:transparent; }
+#player.idle #pSkip[data-kind="manual"] { opacity:0; pointer-events:none; }

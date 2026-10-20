@@ -64,6 +64,11 @@ http.createServer((req, res) => {
   if (u.pathname === '/meta/movie/tt0000003.json') return json({ meta: { ...movie, id: 'tt0000003', imdb_id: 'tt0000003', name: 'Only French' } });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });
   if (/\/stream\/movie\/tt0000003/.test(u.pathname)) return json({ streams: [stream('1080p', 'FRA1', 'a.webm', '\n🇫🇷'), stream('720p', 'FRA2', 'a.webm', '\n🇫🇷')] });
+  { // episodes with special files: chapters (S1E3) and a black "credits" ending (S2E1)
+    const sp = /\/stream\/series\/(tt0000002:\d:\d)/.exec(u.pathname);
+    const special = sp && { 'tt0000002:1:3': 'ch.webm', 'tt0000002:2:1': 'dark.webm' }[sp[1]];
+    if (special) return json({ streams: [stream('1080p', 'SPECIAL', special), stream('720p', 'SPECIAL720', special)] });
+  }
   if (/\/stream\//.test(u.pathname)) {
     return json({ streams: [stream('1080p', 'AC3', 'b.mkv'), stream('720p', 'OPUS', 'a.webm'), stream('480p', 'OPUS2', 'a.webm'), stream('1080p', 'FR', 'a.webm', '\n🇫🇷'), stream('1080p', 'UNFLAGGEDFR', 'c.webm'), stream('2160p', 'DUALTRACK', 'd.mkv')] });
   }

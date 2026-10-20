@@ -5,6 +5,7 @@ const Player = (() => {
   const $ = (s) => document.querySelector(s);
   const root = $('#player'), video = $('#video'), seek = $('#pSeek');
   let ctx, pick, stream, mode, offset = 0, duration = 0, info = {}, fellBack = false;
+  let segs = {}, learned = { intro: null, creditsFromEnd: null }, creditsDetectedAt = null, darkRun = 0;
   let audioDelay = Number(localStorage.getItem('ss.audioDelay') || 0), lastSave = 0, nextPromise = null, subTracks = [], activeSub = -1, idleTimer, token = 0;
 
   const fmt = (t) => {
@@ -18,7 +19,9 @@ const Player = (() => {
 
   // ---------- opening / loading ----------
   async function open(c, resolution, startAt) {
-    ctx = c; nextPromise = null; activeSub = -1; $('#pNext').hidden = true; $('#pWarn').hidden = true; watch.reset(true);
+    ctx = c; nextPromise = null; activeSub = -1; $('#pNext').hidden = true; $('#pWarn').hidden = true; $('#pSkip').hidden = true; watch.reset(true);
+    segs = {}; learned = { intro: null, creditsFromEnd: null }; creditsDetectedAt = null; darkRun = 0;
+    if (ctx.type === 'series') api('/skips?id=' + ctx.meta.id).then((r) => { learned = { intro: r.intro, creditsFromEnd: r.creditsFromEnd }; }).catch(() => {});
     pick = ctx.picks.find((p) => p.resolution === resolution) || ctx.picks[0];
     $('#pTitle').textContent = ctx.title;
     $('#pSub').textContent = ctx.subtitleLine || '';
@@ -40,6 +43,7 @@ const Player = (() => {
     info = await api('/probe?ref=' + s.ref).catch(() => ({ mode: 'direct' }));
     if (my !== token) return;
     duration = info.duration || 0;
+    segs = info.segments || {};
     mode = info.mode === 'compat' || (audioDelay !== 0 && info.ffmpeg) ? 'compat' : 'direct';
     setSource(at);
     if (autoplay) video.play().catch(() => {});
@@ -135,7 +139,7 @@ const Player = (() => {
     tip.style.left = frac(e) * 100 + '%'; tip.textContent = fmt(frac(e) * total());
     if (dragging) paintSeek(frac(e) * total());
   });
-  seek.addEventListener('pointerup', (e) => { if (dragging) { dragging = false; seekTo(frac(e) * total()); } });
+  seek.addEventListener('pointerup', (e) => { if (dragging) { dragging = false; const to = frac(e) * total(), from = cur(); if (to - from >= 20 && from < 480) learnIntro(from, to); seekTo(to); } });
   seek.addEventListener('pointerleave', () => { seek.querySelector('.tip').hidden = true; });
 
   function paintSeek(t) {
@@ -151,7 +155,7 @@ const Player = (() => {
     const b = video.buffered;
     seek.querySelector('.buf').style.width = b.length && total() ? ((offset + b.end(b.length - 1)) / total()) * 100 + '%' : '0';
     if (Date.now() - lastSave > 10000) markProgress();
-    nextEpisodeCheck(t);
+    nextEpisodeCheck(t); updateSkip(t);
   });
   video.addEventListener('durationchange', () => { if (!duration) paintSeek(cur()); });
 
@@ -264,16 +268,53 @@ const Player = (() => {
   function cycleCaptions() { if (ctx.subs.length) setSub(activeSub >= 0 ? -1 : 0); else toast('No captions found'); }
 
   // ---------- next episode + episode sidebar ----------
+  const nextAt = () => Skip.nextAt({ segments: segs, detectedAt: creditsDetectedAt, creditsFromEnd: learned.creditsFromEnd, duration: total() });
   function nextEpisodeCheck(t) {
     if (!ctx || !ctx.next || !total()) return;
-    const remaining = total() - t;
-    if (remaining <= 240 && !nextPromise) nextPromise = ctx.next.load().catch(() => null); // prefetch streams
-    const btn = $('#pNext'), show = remaining <= 75 && remaining > -1;
-    if (show && btn.hidden) {
-      btn.querySelector('small').textContent = ctx.next.label;
-      btn.hidden = false;
-    } else if (!show && !btn.hidden && remaining > 100) btn.hidden = true;
+    const at = nextAt(), remaining = total() - t;
+    if (t >= at - 150 && !nextPromise) nextPromise = ctx.next.load().catch(() => null); // fetch the next episode's streams ahead of time
+    const btn = $('#pNext'), show = t >= at && remaining > -1;
+    if (show && btn.hidden) { btn.querySelector('small').textContent = ctx.next.label; btn.hidden = false; }
+    else if (!show && !btn.hidden && t < at - 20) btn.hidden = true;
   }
+
+  // ---------- skip intro / recap ----------
+  const skipNow = () => Skip.skipAt(cur(), { segments: segs, learnedIntro: learned.intro, isSeries: ctx && ctx.type === 'series' });
+  function updateSkip(t) {
+    const btn = $('#pSkip'), k = ctx && skipNow();
+    if (k && !$('#pNext').hidden) return;
+    if (!k) { btn.hidden = true; return; }
+    btn.dataset.kind = k.kind;
+    if (btn.hidden || btn.dataset.label !== k.label) { btn.querySelector('span').textContent = k.label + ' ⏭'; btn.dataset.label = k.label; }
+    btn.hidden = false;
+  }
+  $('#pSkip').onclick = () => {
+    const k = skipNow(); if (!k) return;
+    if (k.kind === 'manual') learnIntro(k.from, k.to);
+    seekTo(k.to); $('#pSkip').hidden = true;
+  };
+  /** Remember where this show's intro runs, from a skip the user made, so later episodes get a proper Skip intro button. */
+  function learnIntro(start, end) {
+    if (!ctx || ctx.type !== 'series' || segs.intro || end - start < 15 || end - start > 300 || start > 900) return;
+    api('/skips', { id: ctx.meta.id, kind: 'intro', start, end }).then(() => api('/skips?id=' + ctx.meta.id)).then((r) => { learned = { intro: r.intro, creditsFromEnd: r.creditsFromEnd }; }).catch(() => {});
+  }
+
+  // ---------- credits: noticed from the picture while it plays (no extra download) ----------
+  const probeCanvas = document.createElement('canvas'); probeCanvas.width = 32; probeCanvas.height = 18;
+  const probeCtx = probeCanvas.getContext('2d', { willReadFrequently: true });
+  setInterval(() => {
+    if (root.hidden || video.paused || !ctx || !ctx.next || !total() || creditsDetectedAt) return;
+    const remaining = total() - cur();
+    if (remaining > 420 || remaining < 8) { darkRun = 0; return; }
+    try {
+      probeCtx.drawImage(video, 0, 0, 32, 18);
+      darkRun = Skip.frameIsCreditsLike(probeCtx.getImageData(0, 0, 32, 18).data) ? darkRun + 1 : Math.max(0, darkRun - 2);
+    } catch { return; }
+    if (darkRun >= 6) { // six seconds of mostly black: the credits have started
+      creditsDetectedAt = cur() - 6;
+      if (!segs.credits) api('/skips', { id: ctx.meta.id, kind: 'credits', fromEnd: total() - creditsDetectedAt }).then(() => api('/skips?id=' + ctx.meta.id)).then((r) => { learned.creditsFromEnd = r.creditsFromEnd; }).catch(() => {});
+    }
+  }, 1000);
   $('#pNext').onclick = async () => {
     const next = await (nextPromise || ctx.next.load());
     if (!next || !next.picks.length) return toast('No streams available for the next episode');

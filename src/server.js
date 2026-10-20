@@ -11,6 +11,7 @@ const subtitles = require('./lib/subtitles');
 const tmdb = require('./lib/tmdb');
 const xtream = require('./lib/xtream');
 const live = require('./lib/live');
+const segments = require('./lib/segments');
 const player = require('./lib/player');
 const { selectStreams } = require('./lib/select');
 const { LANGS, tagMatches, isUnknownTag, detectLanguages } = require('./lib/language');
@@ -118,13 +119,14 @@ function run(cmd, args) {
 }
 
 async function ffprobeInfo(url) {
-  const { err, stdout } = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', url]);
+  const { err, stdout } = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', '-show_chapters', url]);
   if (err) return null;
   try {
     const j = JSON.parse(stdout);
     const v = (j.streams || []).find((x) => x.codec_type === 'video' && !x.disposition?.attached_pic);
     const audioTracks = (j.streams || []).filter((x) => x.codec_type === 'audio').map((x) => ({ codec: x.codec_name, lang: x.tags?.language || '' }));
-    return { duration: parseFloat(j.format?.duration) || 0, video: v ? v.codec_name : '', audioTracks, eightBit: !v || !/10|12/.test(v.pix_fmt || '') };
+    const chapters = (j.chapters || []).map((c) => ({ start: parseFloat(c.start_time), end: parseFloat(c.end_time), title: c.tags?.title || '' }));
+    return { duration: parseFloat(j.format?.duration) || 0, video: v ? v.codec_name : '', audioTracks, eightBit: !v || !/10|12/.test(v.pix_fmt || ''), chapters };
   } catch { return null; }
 }
 
@@ -153,7 +155,7 @@ async function probe(ref) {
   const videoOk = !raw.video || (SAFE_VIDEO.has(raw.video) && (raw.video !== 'h264' || raw.eightBit));
   const audioOk = !track || SAFE_AUDIO.has(track.codec);
   const needsConvert = !videoOk || !audioOk || idx > 0;
-  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', mode: raw.ffmpeg && needsConvert ? 'compat' : 'direct' };
+  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', mode: raw.ffmpeg && needsConvert ? 'compat' : 'direct', segments: segments.fromChapters(raw.chapters, raw.duration) };
 }
 
 /** Index of the audio track in the user's language (first track if none is tagged). */
@@ -328,6 +330,24 @@ function createServer(port) {
       const cfg = config.loadConfig();
       if (!cfg.subtitles) return [];
       try { return await subtitles.listSubtitles(q.get('type'), q.get('id'), cfg.nativeLanguage); } catch { return []; }
+    },
+    // What we've learned about a show's intro and credits from the user's own skipping and viewing.
+    async 'GET /api/skips'(req, q) {
+      const e = config.loadData().skips?.[q.get('id')] || {};
+      return { intro: e.intro ? { start: e.intro.start.value, end: e.intro.end.value } : null, creditsFromEnd: e.credits ? e.credits.value : null };
+    },
+    async 'POST /api/skips'(req) {
+      const b = await readBody(req);
+      if (!/^tt\d+$/.test(b.id || '')) throw new HttpError(400, 'bad id');
+      const data = config.loadData(), e = (data.skips = data.skips || {})[b.id] = data.skips[b.id] || {};
+      if (b.kind === 'intro' && b.start >= 0 && b.end - b.start >= 15 && b.end - b.start <= 300 && b.start < 900) {
+        e.intro = { start: segments.blend(e.intro?.start, b.start), end: segments.blend(e.intro?.end, b.end) };
+        e.intro.start.n = e.intro.end.n = Math.max(e.intro.start.n, e.intro.end.n);
+      } else if (b.kind === 'credits' && b.fromEnd >= 15 && b.fromEnd <= 900) {
+        e.credits = segments.blend(e.credits, b.fromEnd);
+      } else throw new HttpError(400, 'bad skip data');
+      config.saveData(data);
+      return { ok: true };
     },
     async 'GET /api/resume'(req, q) {
       const p = config.loadData().progress[q.get('key')];
