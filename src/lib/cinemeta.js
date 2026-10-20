@@ -17,7 +17,8 @@ async function get(path) {
       const res = await fetch(BASE + path, { signal: AbortSignal.timeout(12000) });
       if (res.ok) {
         const value = await res.json();
-        cache.set(path, { at: Date.now(), value });
+        // never remember an empty answer: a one-off empty page from the service would otherwise look like "the end" for ten minutes
+        if ((value.metas && value.metas.length) || value.meta) cache.set(path, { at: Date.now(), value });
         return value;
       }
       lastErr = new Error(`Cinemeta returned HTTP ${res.status}`);

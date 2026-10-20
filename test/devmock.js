@@ -8,6 +8,7 @@ const path = require('path');
 const port = Number(process.argv[2] || 7990);
 const dir = process.env.MOCK_VIDEO_DIR || __dirname;
 const self = `http://127.0.0.1:${port}`;
+const flaky = {};
 const posters = (n) => ({ poster: '', background: '', description: `Mock description for ${n}.`, imdbRating: '8.1', releaseInfo: '2024', genres: ['Drama'] });
 const movie = { id: 'tt0000001', imdb_id: 'tt0000001', type: 'movie', name: 'Mock Movie', ...posters('movie'), genres: ['Action', 'Drama'], runtime: '30 s' };
 const videos = [];
@@ -28,6 +29,7 @@ http.createServer((req, res) => {
   if (/^\/catalog\/movie\/.*boom/.test(u.pathname)) { res.writeHead(504); return res.end(); } // simulate a Cinemeta gateway timeout
   if (/^\/catalog\/(movie|series)\//.test(u.pathname)) {
     const type = u.pathname.split('/')[2], skip = Number((/skip=(\d+)/.exec(u.pathname) || [])[1] || 0);
+    if (type === 'series' && skip === 80 && (flaky.n = (flaky.n || 0) + 1) <= 3) { res.writeHead(504); return res.end(); } // a few gateway timeouts, then fine
     if (skip >= 120) return json({ metas: [] });               // three pages of 40, then the end
     const base = type === 'movie' ? movie : series;
     return json({ metas: Array.from({ length: 40 }, (_, i) => ({ ...base, id: i === 0 && skip === 0 ? base.id : `tt9${String(skip + i).padStart(6, '0')}`, name: `${base.name} ${skip + i + 1}` })) });

@@ -34,3 +34,17 @@ test('Cinemeta retries gateway errors, then serves stale data, then reports a cl
   await assert.rejects(cinemeta.catalog('series', { search: 'gone' }), /HTTP 404/);
   assert.equal(hits, 1);
 });
+
+test('Cinemeta never caches an empty catalog page', async (t) => {
+  let empty = true, hits = 0;
+  const srv = http.createServer((req, res) => { hits++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ metas: empty ? [] : [{ id: 'tt1', name: 'Back' }] })); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  process.env.STREAMSNAP_CINEMETA_URL = `http://127.0.0.1:${srv.address().port}`;
+  t.after(() => { srv.closeAllConnections(); srv.close(); });
+  delete require.cache[require.resolve('../src/lib/cinemeta')];
+  const cinemeta = require('../src/lib/cinemeta');
+  assert.deepEqual(await cinemeta.catalog('series', { skip: 100 }), []);   // a transient empty answer...
+  empty = false;
+  assert.equal((await cinemeta.catalog('series', { skip: 100 }))[0].name, 'Back'); // ...is not remembered
+  assert.equal(hits, 2);
+});

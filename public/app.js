@@ -149,21 +149,36 @@ async function discover(type) {
     genres.map((g) => h('option', { value: g, selected: g === genre }, g || 'All genres')));
   const entry = () => { const k = `${type}|${genre}`; if (!discoverCache.has(k)) discoverCache.set(k, { items: [], skip: 0, done: false }); return discoverCache.get(k); };
 
-  async function load() {
+  let note = null;   // the "end of list" or error message under the grid
+  const setNote = (el) => { note && note.remove(); note = el; if (el) grid.after(el); };
+  async function load(attempt = 0) {
     const e = entry(), mine = genre;
-    more.disabled = true;
+    more.disabled = true; setNote(null);
     try {
-      const items = await api(`/catalog?type=${type}&genre=${encodeURIComponent(mine)}&skip=${e.skip}`);
-      e.skip += items.length; e.done = !items.length; e.items.push(...items);
-      if (genre === mine) { grid.append(...items.map((m) => card(m))); more.hidden = e.done; }
-    } catch (err) { grid.after(showErr(err)); }
+      let items = await api(`/catalog?type=${type}&genre=${encodeURIComponent(mine)}&skip=${e.skip}`);
+      e.skip += items.length;                                        // advance by what the service sent, duplicates included
+      const seen = new Set(e.items.map((m) => m.id || m.imdb_id));
+      items = items.filter((m) => !seen.has(m.id || m.imdb_id));     // pages can overlap
+      e.items.push(...items);
+      if (genre !== mine) return;
+      grid.append(...items.map((m) => card(m)));
+      if (!items.length && e.skip && attempt < 2 && e.lastGot) return load(attempt + 1); // a page of only repeats: keep going
+      e.lastGot = items.length > 0 || e.lastGot;
+      e.done = !items.length;
+      more.hidden = e.done;
+      if (e.done) setNote(h('p', { class: 'subtle', style: 'text-align:center;margin-top:20px' }, e.items.length ? 'You’ve reached the end of the list.' : 'Nothing found.'));
+    } catch (err) {
+      if (genre === mine) setNote(retryBox(err, () => load()));      // the button below still works too
+    }
     more.disabled = false;
   }
   /** Draw the list from memory (instant, so scroll restore works), and fetch the first page only if there's nothing yet. */
   function show() {
     const e = entry();
+    setNote(null);
     grid.replaceChildren(...e.items.map((m) => card(m)));
     more.hidden = e.done; more.disabled = false;
+    if (e.done) setNote(h('p', { class: 'subtle', style: 'text-align:center;margin-top:20px' }, 'You’ve reached the end of the list.'));
     if (!e.items.length) load();
   }
   const seg = h('div', { class: 'seg' },
