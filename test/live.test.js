@@ -71,3 +71,16 @@ test('Live TV end to end against a mock Xtream server', { skip: !haveFfmpeg && '
   const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', out]).stdout.toString();
   assert.match(probe, /h264/); assert.match(probe, /opus/);
 });
+
+test('live ffmpeg arguments: heavy video is capped and lightened, audio is locked and offset', () => {
+  const { ffmpegArgs } = require('../src/lib/live');
+  const flat = (a) => a.join(' ');
+  const hevc4k = flat(ffmpegArgs('http://x/1.ts', { video: 'hevc', audio: 'ac3', interlaced: false, height: 2160 }));
+  assert.match(hevc4k, /libx264 -preset ultrafast/); assert.match(hevc4k, /scale=-2:'min\(1080,ih\)'/); assert.match(hevc4k, /aresample=async=1000/);
+  assert.match(flat(ffmpegArgs('http://x/1.ts', { video: 'mpeg2video', audio: 'mp2', interlaced: true, height: 576 })), /yadif=0:-1:1/);
+  const h264 = flat(ffmpegArgs('http://x/1.ts', { video: 'h264', audio: 'aac', height: 1080 }));
+  assert.match(h264, /-c:v copy/); assert.doesNotMatch(h264, /scale=/);
+  assert.match(flat(ffmpegArgs('http://x/1.ts', { video: 'h264', audio: 'aac', height: 1080 }, 300)), /adelay=300:all=1/);
+  assert.match(flat(ffmpegArgs('http://x/1.ts', { video: 'h264', audio: 'aac', height: 1080 }, -250)), /atrim=start=0\.250,asetpts=PTS-STARTPTS/);
+  assert.match(flat(ffmpegArgs('http://x/1.ts', { video: 'h264', audio: 'opus', height: 1080 })), /-c:a copy/);
+});

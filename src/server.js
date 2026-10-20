@@ -427,7 +427,7 @@ function createServer(port) {
       if ((m = /^\/api\/live\/stream\/(\d+)$/.exec(url.pathname)) && req.method === 'GET') {
         const cfg = config.loadConfig();
         if (!cfg.xtreamUrl || !player.available().ffmpeg) throw new HttpError(400, player.available().ffmpeg ? 'Live TV isn\'t set up.' : 'Live TV needs ffmpeg (sudo dnf/apt install ffmpeg).');
-        return live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1]);
+        return live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1], parseInt(url.searchParams.get('a'), 10) || 0);
       }
       if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0);
       if ((m = /^\/api\/sub\/([0-9a-f]{20})\.vtt$/.exec(url.pathname)) && req.method === 'GET') {
