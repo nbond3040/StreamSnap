@@ -53,8 +53,8 @@ const Live = (() => {
   }
 
   /** The channels for the current selection, or global search results when something is typed. */
-  function pool() {
-    const q = state.q.trim().toLowerCase(), s = state.sel;
+  function pool(s = state.sel, query = state.q) {
+    const q = query.trim().toLowerCase();
     const shown = new Set(shownCats().map((c) => c.id));
     if (q) return data.channels.filter((c) => shown.has(c.cat) && !isSep(c.name) && (c.name.toLowerCase().includes(q) || String(c.num) === q));
     if (s.type === 'fav') return data.channels.filter((c) => fav.has(c.id));
@@ -240,7 +240,7 @@ const Live = (() => {
   }
 
   // --- hide the categories you never watch (there can be hundreds) ---
-  function manageCategories() {
+  function manageCategories(onDone) {
     const q = h('input', { type: 'search', placeholder: 'Find a category', autocomplete: 'off' });
     const list = h('div', { class: 'mc-list' });
     const modal = h('div', { class: 'modal', onclick: (e) => { if (e.target === modal) done(); } },
@@ -264,7 +264,13 @@ const Live = (() => {
       if (!groups.length) list.append(h('div', { class: 'subtle' }, 'No matching categories.'));
     }
     q.oninput = paintList;
-    function done() { modal.remove(); const s = state.sel; if (s.type === 'cat' && hidden.has(s.id)) state.sel = { type: 'all' }; draw(); }
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); done(); } };
+    function done() {
+      modal.remove(); document.removeEventListener('keydown', onKey, true);
+      const s = state.sel; if (s.type === 'cat' && hidden.has(s.id)) state.sel = { type: 'all' };
+      if (onDone) onDone(); else draw();
+    }
+    document.addEventListener('keydown', onKey, true);
     document.body.append(modal); paintList(); q.focus();
   }
 
@@ -276,6 +282,7 @@ const Live = (() => {
     if (!(window.APPINFO || {}).players?.ffmpeg) return toast('Live TV needs ffmpeg installed (sudo dnf install ffmpeg, or apt install ffmpeg).');
     playlist = list.length ? list : [ch];
     idx = Math.max(0, playlist.findIndex((c) => c.id === ch.id));
+    gFilter = state.q.trim() || state.sel.type === 'home' ? { type: 'all' } : { ...state.sel }; // the guide starts from the list you came from
     $('#livePlayer').hidden = false; document.body.style.overflow = 'hidden';
     tune();
   }
@@ -293,8 +300,8 @@ const Live = (() => {
   }
 
   /** @param keep  true when restarting the same channel automatically, so the health counters carry over */
-  function tune(keep) {
-    current = playlist[idx];
+  function tune(keep, ch) {
+    current = ch || playlist[idx];
     if (!current) return;
     $('#lpWarn').hidden = true; watch.reset(!keep);
     $('#lpName').textContent = `${current.num} · ${disp(current)}`;
@@ -326,9 +333,41 @@ const Live = (() => {
   let gSel = 0, gObs, gTimer, gStart = 0;
   const sched = new Map(); // channel id -> { at, list } with a longer schedule than the list rows need
   const guideOpen = () => !guideEl.hidden;
+  let gFilter = { type: 'all' }, gQ = '';
+
+  /** Region / category pickers, search and "Manage categories" for the guide (same data as the main page). */
+  function drawGuideBar() {
+    const rs = regions(), f = gFilter;
+    const regionOf = f.type === 'region' ? f.id : f.type === 'cat' ? (catById.get(f.id) || {}).region : null;
+    const total = shownCats().reduce((a, c) => a + c.count, 0);
+    const regSel = h('select', { onchange: () => { const v = regSel.value; setGuideList(v === 'fav' ? { type: 'fav' } : v === 'all' ? { type: 'all' } : { type: 'region', id: v }); } },
+      h('option', { value: 'fav' }, `★ Favorites (${n(fav.size)})`), h('option', { value: 'all' }, `All channels (${n(total)})`), ...rs.map((r) => h('option', { value: r.name }, `${r.name} (${n(r.count)})`)));
+    regSel.value = f.type === 'fav' ? 'fav' : f.type === 'all' ? 'all' : regionOf || 'all';
+    const catSel = regionOf ? h('select', { onchange: () => setGuideList(catSel.value === '*' ? { type: 'region', id: regionOf } : { type: 'cat', id: catSel.value }) },
+      h('option', { value: '*' }, `All ${regionOf}`), ...((rs.find((r) => r.name === regionOf) || {}).cats || []).map((c) => h('option', { value: c.id }, `${c.label} (${n(c.count)})`))) : null;
+    if (catSel) catSel.value = f.type === 'cat' ? f.id : '*';
+    let t; const search = h('input', { type: 'search', placeholder: 'Search channels', value: gQ, autocomplete: 'off', oninput: () => { clearTimeout(t); t = setTimeout(() => { gQ = search.value; applyGuideList(); }, 160); } });
+    const manage = h('button', { class: 'btn ghost sm', onclick: () => manageCategories(() => {
+      if (gFilter.type === 'cat' && hidden.has(gFilter.id)) gFilter = { type: 'all' };
+      if (gFilter.type === 'region' && !rs.some((r) => r.name === gFilter.id)) gFilter = { type: 'all' };
+      drawGuideBar(); applyGuideList();
+    }) }, 'Manage categories');
+    $('#lgBar').replaceChildren(regSel, catSel, search, manage);
+  }
+  function setGuideList(f) { gFilter = f; drawGuideBar(); applyGuideList(); }
+  /** Swap the guide's channel list (and what ↑/↓ steps through) for the chosen category or search. */
+  function applyGuideList() {
+    playlist = pool(gFilter, gQ).filter((c) => !isSep(c.name));
+    idx = current ? playlist.findIndex((c) => c.id === current.id) : -1;
+    gSel = idx >= 0 ? idx : 0; gStart = Math.max(0, gSel - 8);
+    drawGuide();
+    if (playlist.length) selectGuide(gSel, true);
+    else $('#lgSched').replaceChildren(h('div', { class: 'subtle' }, gQ.trim() ? 'No channels match your search.' : 'No channels here.'));
+  }
 
   function openGuide() {
     if (!current) return;
+    gQ = ''; drawGuideBar();
     guideEl.hidden = false; $('#livePlayer').classList.remove('idle');
     gSel = idx; gStart = Math.max(0, idx - 8);
     drawGuide(); selectGuide(gSel, true);
@@ -406,7 +445,7 @@ const Live = (() => {
   function tuneTo(i) { if (i === idx) { closeGuide(); return; } idx = i; closeGuide(); tune(); }
 
   // Refresh: drop the connection and start the channel again. A fresh start re-aligns picture and sound.
-  function refresh() { if (!current) return; toast('Refreshing stream…'); tune(); }
+  function refresh() { if (!current) return; toast('Refreshing stream…'); tune(false, current); }
   $('#lpRefresh').onclick = refresh;
 
   $('#lgClose').onclick = closeGuide;
@@ -415,7 +454,11 @@ const Live = (() => {
   $('#lpInfo').style.cursor = 'pointer'; $('#lpName').parentElement.style.cursor = 'pointer';
 
   const setFavIcon = () => { const b = $('#lpFav'); b.classList.toggle('on', fav.has(current.id)); setIcon(b.firstElementChild, fav.has(current.id) ? 'starFill' : 'star'); };
-  const zap = (d) => { if (playlist.length > 1) { idx = (idx + d + playlist.length) % playlist.length; tune(); } };
+  const zap = (d) => {
+    if (!playlist.length || (playlist.length === 1 && idx === 0)) return;
+    idx = idx < 0 ? (d > 0 ? 0 : playlist.length - 1) : (idx + d + playlist.length) % playlist.length; // idx is -1 when the watched channel isn't in the guide's current list
+    tune();
+  };
 
   /** Give up on a channel that never starts or stalls for too long, and free the provider connection. */
   function watchdog(ms) {
@@ -425,13 +468,13 @@ const Live = (() => {
   function giveUp(msg) {
     clearTimeout(startTimer);
     video.removeAttribute('src'); video.load();
-    status('err', msg, tune);
+    status('err', msg, () => tune(false, current));
   }
   // playback health: restart the channel once on its own, then explain and offer the options
   const warn = $('#lpWarn');
   const watch = PlaybackWatch(video, { onBehind: (reason, n) => {
     if ($('#livePlayer').hidden || !current) return;
-    if (n === 1) { toast('Picture was falling behind, so the channel was restarted.'); tune(true); return; }
+    if (n === 1) { toast('Picture was falling behind, so the channel was restarted.'); tune(true, current); return; }
     warn.replaceChildren(h('span', {}, `This channel keeps ${reason === 'dropped' ? 'dropping frames' : 'stalling'}; your computer may be struggling with it.`),
       h('button', { class: 'btn sm', onclick: () => { warn.hidden = true; refresh(); } }, 'Refresh'),
       playlist.length > 1 && h('button', { class: 'btn ghost sm', onclick: () => { warn.hidden = true; zap(1); } }, 'Next channel'),
@@ -472,7 +515,11 @@ const Live = (() => {
   $('#livePlayer').addEventListener('mousemove', () => wake(false));
   setInterval(() => { if (!$('#livePlayer').hidden && current) info(); }, 30000); // progress bar and "now" roll over
   addEventListener('keydown', (e) => {
-    if ($('#livePlayer').hidden) return;
+    if ($('#livePlayer').hidden || document.querySelector('.modal')) return;
+    if (e.target.matches && e.target.matches('input, textarea')) { // typing in the guide's search box
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (e.target.value) { e.target.value = ''; e.target.dispatchEvent(new Event('input')); } else e.target.blur(); }
+      return;
+    }
     if (guideOpen()) {
       const k = e.key;
       if (k === 'Escape' || k.toLowerCase() === 'g') { e.preventDefault(); e.stopPropagation(); closeGuide(); }
