@@ -26,7 +26,12 @@ http.createServer((req, res) => {
   const u = new URL(req.url, self);
   let m;
   if (/^\/catalog\/movie\/.*boom/.test(u.pathname)) { res.writeHead(504); return res.end(); } // simulate a Cinemeta gateway timeout
-  if (/^\/catalog\/(movie|series)\//.test(u.pathname)) return json({ metas: [movie, series] });
+  if (/^\/catalog\/(movie|series)\//.test(u.pathname)) {
+    const type = u.pathname.split('/')[2], skip = Number((/skip=(\d+)/.exec(u.pathname) || [])[1] || 0);
+    if (skip >= 120) return json({ metas: [] });               // three pages of 40, then the end
+    const base = type === 'movie' ? movie : series;
+    return json({ metas: Array.from({ length: 40 }, (_, i) => ({ ...base, id: i === 0 && skip === 0 ? base.id : `tt9${String(skip + i).padStart(6, '0')}`, name: `${base.name} ${skip + i + 1}` })) });
+  }
   // TMDB stand-in: tt0000001 belongs to a 3-film collection
   if (u.pathname.startsWith('/3/find/')) return json({ movie_results: u.pathname.endsWith('tt0000001') ? [{ id: 100 }] : [] });
   if (u.pathname === '/3/movie/100') return json({ belongs_to_collection: { id: 9, name: 'Mock Collection' } });
@@ -52,6 +57,7 @@ http.createServer((req, res) => {
   if (u.pathname === '/live/u/p/115.ts') { res.writeHead(200, { 'content-type': 'video/mp2t' }); return; } // off air: connects, then never sends anything
   if (u.pathname === '/live/u/p/116.ts') { res.writeHead(404); return res.end(); }
   if (/^\/live\/u\/p\/\d+\.ts$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'video/mp2t' }); return fs.createReadStream(path.join(dir, 'live.ts')).pipe(res); }
+  if ((m = /^\/meta\/(movie|series)\/(tt9\d+)\.json$/.exec(u.pathname))) return json({ meta: { ...(m[1] === 'movie' ? movie : series), id: m[2], imdb_id: m[2], name: `Generated ${m[2]}` } });
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
   if (u.pathname === '/meta/movie/tt0000003.json') return json({ meta: { ...movie, id: 'tt0000003', imdb_id: 'tt0000003', name: 'Only French' } });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });

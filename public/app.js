@@ -136,26 +136,41 @@ async function home() {
   view.replaceChildren(...out);
 }
 
+// Discover remembers what has been loaded (per type and genre) and the genre you picked, so Back restores the same list.
+const discoverCache = new Map();   // "type|genre" -> { items, skip, done }
+const discoverGenre = { movie: '', series: '' };
+
 async function discover(type) {
-  let genre = '', skip = 0;
+  let genre = discoverGenre[type] || '';
   const grid = h('div', { class: 'grid' });
   const more = h('button', { class: 'btn ghost', onclick: () => load() }, 'Load more');
   const genres = ['', 'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller'];
-  const sel = h('select', { class: 'pill', onchange: () => { genre = sel.value; skip = 0; grid.replaceChildren(); load(); } },
-    genres.map((g) => h('option', { value: g }, g || 'All genres')));
+  const sel = h('select', { class: 'pill', onchange: () => { genre = sel.value; discoverGenre[type] = genre; show(); } },
+    genres.map((g) => h('option', { value: g, selected: g === genre }, g || 'All genres')));
+  const entry = () => { const k = `${type}|${genre}`; if (!discoverCache.has(k)) discoverCache.set(k, { items: [], skip: 0, done: false }); return discoverCache.get(k); };
+
   async function load() {
+    const e = entry(), mine = genre;
     more.disabled = true;
     try {
-      const items = await api(`/catalog?type=${type}&genre=${encodeURIComponent(genre)}&skip=${skip}`);
-      skip += items.length; grid.append(...items.map((m) => card(m))); more.hidden = !items.length;
-    } catch (e) { grid.after(showErr(e)); }
+      const items = await api(`/catalog?type=${type}&genre=${encodeURIComponent(mine)}&skip=${e.skip}`);
+      e.skip += items.length; e.done = !items.length; e.items.push(...items);
+      if (genre === mine) { grid.append(...items.map((m) => card(m))); more.hidden = e.done; }
+    } catch (err) { grid.after(showErr(err)); }
     more.disabled = false;
+  }
+  /** Draw the list from memory (instant, so scroll restore works), and fetch the first page only if there's nothing yet. */
+  function show() {
+    const e = entry();
+    grid.replaceChildren(...e.items.map((m) => card(m)));
+    more.hidden = e.done; more.disabled = false;
+    if (!e.items.length) load();
   }
   const seg = h('div', { class: 'seg' },
     h('button', { class: type === 'movie' ? 'on' : '', onclick: () => (location.hash = '#/discover/movie') }, 'Movies'),
     h('button', { class: type === 'series' ? 'on' : '', onclick: () => (location.hash = '#/discover/series') }, 'Series'));
   view.replaceChildren(h('div', { class: 'filters' }, seg, sel), grid, h('p', { style: 'text-align:center;margin-top:28px' }, more));
-  load();
+  show();
 }
 
 async function searchView(q) {
