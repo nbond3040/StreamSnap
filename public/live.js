@@ -287,14 +287,16 @@ const Live = (() => {
     root.classList.remove('idle'); // never hide the controls while something is wrong or loading
     el.replaceChildren(h('div', {}, kind === 'spin' && h('div', { class: 'spinner' }), h('div', { class: 'lp-msg' }, msg),
       kind === 'err' && h('div', { class: 'btns' },
-        retry && h('button', { class: 'btn', onclick: retry }, 'Try again'),
+        retry && h('button', { class: 'btn', onclick: () => retry() }, 'Try again'),
         playlist.length > 1 && h('button', { class: 'btn ghost', onclick: () => zap(1) }, 'Next channel ↓'),
         h('button', { class: 'btn ghost', onclick: close }, 'Back to channels'))));
   }
 
-  function tune() {
+  /** @param keep  true when restarting the same channel automatically, so the health counters carry over */
+  function tune(keep) {
     current = playlist[idx];
     if (!current) return;
+    $('#lpWarn').hidden = true; watch.reset(!keep);
     $('#lpName').textContent = `${current.num} · ${disp(current)}`;
     $('#lpNow').textContent = '';
     setFavIcon();
@@ -425,6 +427,17 @@ const Live = (() => {
     video.removeAttribute('src'); video.load();
     status('err', msg, tune);
   }
+  // playback health: restart the channel once on its own, then explain and offer the options
+  const warn = $('#lpWarn');
+  const watch = PlaybackWatch(video, { onBehind: (reason, n) => {
+    if ($('#livePlayer').hidden || !current) return;
+    if (n === 1) { toast('Picture was falling behind, so the channel was restarted.'); tune(true); return; }
+    warn.replaceChildren(h('span', {}, `This channel keeps ${reason === 'dropped' ? 'dropping frames' : 'stalling'}; your computer may be struggling with it.`),
+      h('button', { class: 'btn sm', onclick: () => { warn.hidden = true; refresh(); } }, 'Refresh'),
+      playlist.length > 1 && h('button', { class: 'btn ghost sm', onclick: () => { warn.hidden = true; zap(1); } }, 'Next channel'),
+      h('button', { class: 'btn ghost sm', onclick: () => (warn.hidden = true) }, 'Dismiss'));
+    warn.hidden = false;
+  } });
   video.addEventListener('playing', () => { clearTimeout(startTimer); status(null); });
   video.addEventListener('waiting', () => { status('spin', 'Buffering…'); watchdog(25000); });
   video.addEventListener('error', async () => {
@@ -445,7 +458,7 @@ const Live = (() => {
 
   function close() {
     if ($('#livePlayer').hidden) return;
-    clearTimeout(startTimer); video.pause(); video.removeAttribute('src'); video.load(); guideEl.hidden = true;
+    clearTimeout(startTimer); video.pause(); video.removeAttribute('src'); video.load(); guideEl.hidden = true; warn.hidden = true;
     $('#livePlayer').hidden = true; document.body.style.overflow = '';
     if (document.fullscreenElement) document.exitFullscreen();
   }

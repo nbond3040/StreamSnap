@@ -24,6 +24,7 @@
     <a href="#/live" data-nav="live">Live TV</a>
   </nav>
   <form id="search"><input name="q" type="search" placeholder="Search movies &amp; series" autocomplete="off"></form>
+  <button class="iconbtn" id="appFull" title="Fullscreen (F11)" aria-label="Fullscreen"><span data-icon="fullscreen"></span></button>
   <a href="#/settings" class="iconbtn" data-nav="settings" title="Settings" aria-label="Settings"><span data-icon="settings"></span></a>
 </header>
 <main id="view"></main>
@@ -35,6 +36,7 @@
     <div><div id="pTitle"></div><div id="pSub"></div></div>
   </div>
   <div id="pStatus" hidden></div>
+  <div class="warnbar" id="pWarn" hidden></div>
   <button id="pNext" hidden><span>Next episode ▶</span><small></small></button>
   <aside id="pSide" hidden>
     <div class="side-h"><b>Episodes</b><button class="pbtn" id="pSideClose" title="Close"><span data-icon="close"></span></button></div>
@@ -73,6 +75,7 @@
     <div class="lg-sched-wrap"><button class="pbtn lg-close" id="lgClose" title="Close (Esc)"><span data-icon="close"></span></button><div id="lgSched"></div></div>
   </div>
   <div id="lpStatus" hidden></div>
+  <div class="warnbar" id="lpWarn" hidden></div>
   <div class="lp-bottom">
     <div id="lpInfo"></div>
     <div class="lp-btns">
@@ -87,6 +90,7 @@
 <div id="toast" hidden></div>
 <script src="/icons.js"></script>
 <script src="/dropdown.js"></script>
+<script src="/watch.js"></script>
 <script src="/player.js"></script>
 <script src="/live.js"></script>
 <script src="/app.js"></script>

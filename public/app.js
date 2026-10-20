@@ -534,6 +534,20 @@ $('#search').onsubmit = (e) => {
   input.value = ''; input.blur(); // the box is for the next search; the results page shows what was searched
 };
 
+// Whole-window fullscreen (button next to Settings, and F11)
+function toggleAppFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen().catch(() => toast('Fullscreen isn’t available here.'));
+}
+function syncFullscreenButton() {
+  const on = !!document.fullscreenElement, b = $('#appFull');
+  setIcon(b.firstElementChild, on ? 'exitFullscreen' : 'fullscreen');
+  b.title = on ? 'Exit fullscreen (F11)' : 'Fullscreen (F11)'; b.setAttribute('aria-label', b.title);
+}
+$('#appFull').onclick = toggleAppFullscreen;
+document.addEventListener('fullscreenchange', syncFullscreenButton);
+addEventListener('keydown', (e) => { if (e.key === 'F11') { e.preventDefault(); toggleAppFullscreen(); } });
+
 // Over a horizontally scrolling row the wheel scrolls that row, not the page.
 view.addEventListener('wheel', (e) => {
   const row = e.target.closest && e.target.closest('.scroller');

@@ -426,3 +426,10 @@ select option { background:var(--s2); color:var(--fg); }
 .lp-hint { font-size:.8em; color:var(--accent2); margin-top:.3em; font-weight:600; }
 @media (max-width:900px) { #lpGuide { grid-template-columns:1fr; } .lg-sched-wrap { display:none; } }
 #livePlayer:has(#lpGuide:not([hidden])) .lp-top, #livePlayer:has(#lpGuide:not([hidden])) .lp-bottom { opacity:0; pointer-events:none; }
+
+.warnbar { position:absolute; left:50%; bottom:140px; transform:translateX(-50%); z-index:5; display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; max-width:min(92%, 46em); background:rgba(18,18,28,.96); border:1px solid var(--line); border-radius:14px; padding:10px 14px; color:#fff; font-size:14px; line-height:1.4; box-shadow:0 12px 40px rgba(0,0,0,.6); animation:ddIn .16s ease-out; }
+
+button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
+#top .iconbtn .ico { width:22px; height:22px; }
+.iconbtn:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.iconbtn:focus:not(:focus-visible) { outline:0; }

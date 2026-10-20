@@ -18,7 +18,7 @@ const Player = (() => {
 
   // ---------- opening / loading ----------
   async function open(c, resolution, startAt) {
-    ctx = c; nextPromise = null; activeSub = -1; $('#pNext').hidden = true;
+    ctx = c; nextPromise = null; activeSub = -1; $('#pNext').hidden = true; $('#pWarn').hidden = true; watch.reset(true);
     pick = ctx.picks.find((p) => p.resolution === resolution) || ctx.picks[0];
     $('#pTitle').textContent = ctx.title;
     $('#pSub').textContent = ctx.subtitleLine || '';
@@ -34,6 +34,7 @@ const Player = (() => {
 
   async function load(s, at, autoplay) {
     const my = ++token;
+    watch.reset(false);
     stream = s; fellBack = false;
     status('spin', 'Loading ' + resLabel(s.resolution) + '…');
     info = await api('/probe?ref=' + s.ref).catch(() => ({ mode: 'direct' }));
@@ -86,6 +87,20 @@ const Player = (() => {
       else if (!Player.warned) { Player.warned = true; status('err', 'This stream’s audio format isn’t supported by the app window.', h('div', { class: 'subtle', style: 'margin-top:8px' }, 'Install ffmpeg (sudo apt install ffmpeg) to fix this automatically, or pick another quality.')); }
     }
   }, 1500);
+
+  // ---------- playback health: restart once on its own, then suggest a lower quality ----------
+  const warn = $('#pWarn');
+  function showWarn(msg, ...actions) {
+    warn.replaceChildren(h('span', {}, msg), ...actions, h('button', { class: 'btn ghost sm', onclick: () => (warn.hidden = true) }, 'Dismiss'));
+    warn.hidden = false;
+  }
+  const watch = PlaybackWatch(video, { onBehind: (reason, n) => {
+    if (root.hidden || !ctx || !stream) return;
+    if (n === 1) { toast('Playback was falling behind, so the stream was restarted.'); const t = cur(), paused = video.paused; load(stream, t, !paused); return; }
+    const lower = ctx.picks[ctx.picks.findIndex((x) => x === pick) + 1];
+    showWarn(`Playback keeps ${reason === 'dropped' ? 'dropping frames' : 'stalling'} at ${resLabel(pick.resolution)}; your computer may be struggling with it.`,
+      lower && h('button', { class: 'btn sm', onclick: () => { warn.hidden = true; switchQuality(lower.resolution); } }, `Switch to ${resLabel(lower.resolution)}`));
+  } });
 
   // ---------- controls ----------
   function toggle() { video.paused ? video.play().catch(() => {}) : video.pause(); }
@@ -316,7 +331,7 @@ const Player = (() => {
     markProgress(); token++;
     video.pause(); video.removeAttribute('src'); video.load();
     for (const t of subTracks) t.track.mode = 'disabled';
-    root.hidden = true; document.body.style.overflow = '';
+    root.hidden = true; $('#pWarn').hidden = true; document.body.style.overflow = '';
     if (document.fullscreenElement) document.exitFullscreen();
     if (window.onPlayerClosed) onPlayerClosed();
   }
