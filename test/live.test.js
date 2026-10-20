@@ -43,7 +43,10 @@ test('Live TV end to end against a mock Xtream server', { skip: !haveFfmpeg && '
   assert.equal((await (await fetch(base + '/api/config')).json()).hasXtreamPass, true);
 
   const b = await (await fetch(base + '/api/live/browse')).json();
-  assert.equal(b.channels.length, 12); assert.deepEqual(b.categories.map((c) => c.name), ['News', 'Sports', 'Movies']);
+  assert.equal(b.channels.length, 14); assert.deepEqual(b.categories.map((c) => c.name), ['US| NEWS NETWORK', 'US| SPORTS NETWORK', 'UK| MOVIES', 'WORLD LIVE SPORTS']);
+  assert.deepEqual((await (await post('/api/live/hide', { ids: ['4', 'x'], hide: true })).json()).hidden, ['4']);
+  assert.deepEqual((await (await fetch(base + '/api/live/browse')).json()).hidden, ['4']);
+  assert.deepEqual((await (await post('/api/live/hide', { ids: ['4'], hide: false })).json()).hidden, []);
   const epg = await (await fetch(base + '/api/live/epg?ids=101,102')).json();
   assert.equal(epg[101][0].title, 'Morning Show 101'); assert.equal(epg[102].length, 3);
   assert.ok(epg[101][0].start < Date.now() && epg[101][0].end > Date.now(), 'first programme is on now');

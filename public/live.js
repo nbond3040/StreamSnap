@@ -5,7 +5,6 @@ const Live = (() => {
   const $ = (s) => document.querySelector(s);
   const PAGE = 60; // rows rendered at a time
   let data = null, fav = new Set(), epg = new Map(); // epg: channel id -> { at, list }
-  const state = { cat: 'all', q: '' };
   let playlist = [], idx = -1, current = null;
 
   const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -23,96 +22,250 @@ const Live = (() => {
     }
   }
 
+  // ---------- data helpers ----------
+  let cfg = { liveLayout: 'grouped', liveTextSize: 'large', liveTidyNames: true };
+  let cats = [], catById = new Map(), hidden = new Set();
+  const state = { sel: { type: 'fav' }, q: '', catQ: '' };
+  const store = (k, v) => { try { v === undefined ? JSON.parse(localStorage.getItem(k)) : localStorage.setItem(k, JSON.stringify(v)); } catch { /* optional */ } };
+  const recall = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  const n = (x) => x.toLocaleString();
+
+  const isSep = (name) => /^[#=*~_\-\s]{2,}.*[#=*~_\-\s]{2,}$/.test(name) && /[A-Za-z0-9]/.test(name);
+  const cleanLabel = (name) => name.replace(/^[#=*~_\-\s]+|[#=*~_\-\s]+$/g, '').trim();
+  /** "US| ESPN HD" -> "ESPN HD" (the country is already shown by the category) */
+  const disp = (ch) => (cfg.liveTidyNames ? cleanLabel(ch.name.replace(/^\s*[A-Za-z0-9+]{1,5}\s*\|\s*/, '')) : cleanLabel(ch.name)) || ch.name;
+
+  function prepare() {
+    hidden = new Set(data.hidden || []);
+    const counts = new Map();
+    for (const c of data.channels) counts.set(c.cat, (counts.get(c.cat) || 0) + 1);
+    cats = data.categories.map((c) => {
+      const m = /^\s*([^|]{1,12}?)\s*\|\s*(.+)$/.exec(c.name);
+      return { id: c.id, name: c.name, region: m ? m[1].trim().toUpperCase() : 'Other', label: m ? m[2].trim() : c.name, count: counts.get(c.id) || 0 };
+    }).filter((c) => c.count > 0);
+    catById = new Map(cats.map((c) => [c.id, c]));
+  }
+  const shownCats = () => cats.filter((c) => !hidden.has(c.id));
+  function regions() {
+    const map = new Map();
+    for (const c of shownCats()) { if (!map.has(c.region)) map.set(c.region, { name: c.region, cats: [], count: 0 }); const r = map.get(c.region); r.cats.push(c); r.count += c.count; }
+    return [...map.values()].sort((a, b) => (a.name === 'Other') - (b.name === 'Other') || b.count - a.count);
+  }
+
+  /** The channels for the current selection, or global search results when something is typed. */
+  function pool() {
+    const q = state.q.trim().toLowerCase(), s = state.sel;
+    const shown = new Set(shownCats().map((c) => c.id));
+    if (q) return data.channels.filter((c) => shown.has(c.cat) && !isSep(c.name) && (c.name.toLowerCase().includes(q) || String(c.num) === q));
+    if (s.type === 'fav') return data.channels.filter((c) => fav.has(c.id));
+    if (s.type === 'cat') return data.channels.filter((c) => c.cat === s.id);
+    if (s.type === 'region') return data.channels.filter((c) => shown.has(c.cat) && catById.get(c.cat).region === s.id);
+    return data.channels.filter((c) => shown.has(c.cat)); // all
+  }
+  function title() {
+    const s = state.sel;
+    if (state.q.trim()) return `Results for “${state.q.trim()}”`;
+    if (s.type === 'fav') return 'Favorites';
+    if (s.type === 'region') return s.id;
+    if (s.type === 'cat') { const c = catById.get(s.id); return c ? `${c.region === 'Other' ? '' : c.region + ' · '}${c.label}` : 'Channels'; }
+    return 'All channels';
+  }
+  function choose(sel) { state.sel = sel; state.q = ''; store('ss.liveSel', sel); draw(); }
+
   // ---------- the page ----------
   async function view() {
     const root = $('#view');
     root.replaceChildren(h('div', { class: 'empty', style: 'margin-top:40px' }, 'Loading channels…'));
-    try { data = await api('/live/browse'); }
+    try { [data, cfg] = await Promise.all([api('/live/browse'), api('/config')]); }
     catch (e) { return root.replaceChildren(h('div', { class: 'live-empty' }, h('h2', {}, 'Couldn’t load Live TV'), h('p', { class: 'subtle' }, e.message), h('div', { class: 'row2', style: 'justify-content:center' }, h('button', { class: 'btn', onclick: view }, 'Try again'), h('a', { class: 'btn ghost', href: '#/settings' }, 'Settings')))); }
     if (!data.configured) {
       return root.replaceChildren(h('div', { class: 'live-empty' }, h('h2', {}, 'Live TV isn’t set up yet'),
         h('p', { class: 'subtle' }, 'Add your Xtream server, username and password in Settings to watch live channels.'), h('a', { class: 'btn', href: '#/settings' }, 'Open Settings')));
     }
+    document.documentElement.dataset.livesize = cfg.liveTextSize || 'large';
     fav = new Set(data.favorites);
-    draw(root);
+    prepare();
+    const saved = recall('ss.liveSel', null);
+    const valid = saved && (saved.type === 'all' || saved.type === 'fav' || saved.type === 'home' || (saved.type === 'cat' && catById.has(saved.id) && !hidden.has(saved.id)) || (saved.type === 'region' && regions().some((r) => r.name === saved.id)));
+    state.sel = valid ? saved : fav.size ? { type: 'fav' } : { type: 'home' };
+    state.q = ''; state.catQ = '';
+    draw();
   }
 
-  const inCat = (c) => (state.cat === 'all' ? true : state.cat === 'fav' ? fav.has(c.id) : c.cat === state.cat);
-  const visible = () => {
-    const q = state.q.trim().toLowerCase();
-    return data.channels.filter((c) => inCat(c) && (!q || c.name.toLowerCase().includes(q) || String(c.num) === q));
-  };
+  let listBox, rowsObs;
+  function draw() {
+    const root = $('#view'), layout = cfg.liveLayout;
+    if (layout !== 'drilldown' && state.sel.type === 'home') state.sel = fav.size ? { type: 'fav' } : { type: 'all' };
+    listBox = h('div', { class: 'live-list' });
+    const search = h('input', { type: 'search', placeholder: 'Search all channels', value: state.q, autocomplete: 'off' });
+    let t; search.oninput = () => { state.q = search.value; clearTimeout(t); t = setTimeout(() => { drawBreadcrumb(); fillList(); }, 160); };
+    const manage = h('button', { class: 'btn ghost sm', onclick: manageCategories }, 'Manage categories');
+    const crumb = h('div', { class: 'crumb' });
+    function drawBreadcrumb() { if (layout === 'drilldown') drawCrumb(crumb); }
 
-  function draw(root) {
-    const rail = h('div', { class: 'live-rail' });
-    const list = h('div', { class: 'live-list' });
-    const search = h('input', { type: 'search', placeholder: 'Search channels', value: state.q, autocomplete: 'off', oninput: () => { state.q = search.value; drawList(); } });
+    if (layout === 'dropdowns') root.replaceChildren(h('div', { class: 'live live-col' }, toolbar(search, manage), listBox));
+    else if (layout === 'drilldown') root.replaceChildren(h('div', { class: 'live live-col' }, h('div', { class: 'live-bar' }, crumb, search, manage), listBox));
+    else root.replaceChildren(h('div', { class: 'live' }, rail(search, manage), listBox));
+    drawBreadcrumb(); fillList();
+  }
 
-    function drawRail() {
-      const count = (f) => data.channels.filter(f).length;
-      const item = (id, label, n) => h('button', { class: 'cat' + (state.cat === id ? ' on' : ''), onclick: () => { state.cat = id; drawRail(); drawList(); } }, h('span', {}, label), h('small', {}, n));
-      rail.replaceChildren(h('div', { class: 'live-search' }, search),
-        h('div', { class: 'cats' }, item('all', 'All channels', data.channels.length), item('fav', '★ Favorites', fav.size),
-          ...data.categories.map((c) => ({ c, n: count((ch) => ch.cat === c.id) })).filter((x) => x.n).map(({ c, n }) => item(c.id, c.name, n))));
+  // --- layout 1: grouped sidebar (regions you can expand) ---
+  const open = new Set(recall('ss.liveOpen', []));
+  function rail(search, manage) {
+    const el = h('div', { class: 'live-rail' });
+    const catSearch = h('input', { type: 'search', placeholder: 'Find a category', value: state.catQ, autocomplete: 'off', oninput: () => { state.catQ = catSearch.value; paint(); catSearch.focus(); } });
+    const item = (label, count, on, click, cls = '') => h('button', { class: `cat ${cls}` + (on ? ' on' : ''), onclick: click }, h('span', {}, label), h('small', {}, n(count)));
+    function paint() {
+      const q = state.catQ.trim().toLowerCase(), s = state.sel;
+      const total = shownCats().reduce((a, c) => a + c.count, 0);
+      const groups = regions().map((r) => {
+        const hit = q ? r.cats.filter((c) => (r.name + ' ' + c.label).toLowerCase().includes(q)) : r.cats;
+        return { r, hit };
+      }).filter((g) => g.hit.length);
+      el.replaceChildren(h('div', { class: 'live-search' }, search), h('div', { class: 'live-search' }, catSearch),
+        h('div', { class: 'cats' },
+          item('All channels', total, s.type === 'all' && !state.q, () => choose({ type: 'all' })),
+          item('★ Favorites', fav.size, s.type === 'fav' && !state.q, () => choose({ type: 'fav' })),
+          ...groups.flatMap(({ r, hit }) => {
+            const isOpen = open.has(r.name) || !!q || (s.type === 'cat' && catById.get(s.id)?.region === r.name) || (s.type === 'region' && s.id === r.name);
+            const head = h('button', { class: 'region' + (isOpen ? ' open' : ''), onclick: () => { open.has(r.name) ? open.delete(r.name) : open.add(r.name); store('ss.liveOpen', [...open]); paint(); } },
+              h('span', { class: 'chev' }), h('span', {}, r.name), h('small', {}, n(r.count)));
+            return [head, ...(isOpen ? [item(`All ${r.name}`, r.count, s.type === 'region' && s.id === r.name && !state.q, () => choose({ type: 'region', id: r.name }), 'sub all'),
+              ...hit.map((c) => item(c.label, c.count, s.type === 'cat' && s.id === c.id && !state.q, () => choose({ type: 'cat', id: c.id }), 'sub'))] : [])];
+          }),
+          !groups.length && h('div', { class: 'subtle', style: 'padding:10px 12px' }, 'No matching categories')),
+        manage);
     }
+    paint();
+    return el;
+  }
 
-    let rows = [], shown = 0, obs;
-    function drawList() {
-      obs && obs.disconnect();
-      rows = visible(); shown = 0;
-      const title = state.cat === 'all' ? 'All channels' : state.cat === 'fav' ? 'Favorites' : (data.categories.find((c) => c.id === state.cat) || {}).name || '';
-      const body = h('div', { class: 'rows' });
-      list.replaceChildren(h('div', { class: 'live-head' }, h('h2', {}, title), h('span', { class: 'count' }, rows.length)), body);
-      if (!rows.length) { body.append(h('div', { class: 'empty' }, state.cat === 'fav' ? 'No favorites yet. Tap ☆ on a channel to add it.' : 'No channels found.')); return; }
-      // lazily fill in "what's on" for rows as they scroll into view, and add more rows near the bottom
-      const pending = new Set(); let timer;
-      obs = new IntersectionObserver((entries) => {
-        for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          if (e.target.classList.contains('sentinel')) { more(); continue; }
-          pending.add(Number(e.target.dataset.id)); obs.unobserve(e.target);
-        }
-        clearTimeout(timer);
-        timer = setTimeout(async () => { const ids = [...pending]; pending.clear(); await fetchEpg(ids); ids.forEach(paint); }, 150);
-      }, { rootMargin: '300px' });
-      const sentinel = h('div', { class: 'sentinel' });
-      function more() {
-        sentinel.remove();
-        for (const ch of rows.slice(shown, shown + PAGE)) { const r = row(ch); body.append(r); obs.observe(r); }
-        shown += PAGE;
-        if (shown < rows.length) { body.append(sentinel); obs.observe(sentinel); }
+  // --- layout 2: dropdowns above the list ---
+  function toolbar(search, manage) {
+    const rs = regions(), s = state.sel;
+    const regionOf = s.type === 'region' ? s.id : s.type === 'cat' ? catById.get(s.id)?.region : null;
+    const total = shownCats().reduce((a, c) => a + c.count, 0);
+    const regSel = h('select', { onchange: () => { const v = regSel.value; choose(v === 'fav' ? { type: 'fav' } : v === 'all' ? { type: 'all' } : { type: 'region', id: v }); } },
+      h('option', { value: 'fav' }, `★ Favorites (${n(fav.size)})`), h('option', { value: 'all' }, `All channels (${n(total)})`),
+      ...rs.map((r) => h('option', { value: r.name }, `${r.name} (${n(r.count)})`)));
+    regSel.value = s.type === 'fav' ? 'fav' : s.type === 'all' ? 'all' : regionOf || 'all';
+    const catSel = regionOf ? h('select', { onchange: () => choose(catSel.value === '*' ? { type: 'region', id: regionOf } : { type: 'cat', id: catSel.value }) },
+      h('option', { value: '*' }, `All ${regionOf}`), ...(rs.find((r) => r.name === regionOf)?.cats || []).map((c) => h('option', { value: c.id }, `${c.label} (${n(c.count)})`))) : null;
+    if (catSel) catSel.value = s.type === 'cat' ? s.id : '*';
+    return h('div', { class: 'live-bar' }, regSel, catSel, search, manage);
+  }
+
+  // --- layout 3: drill down through big tiles ---
+  function drawCrumb(el) {
+    const s = state.sel, parts = [h('button', { onclick: () => choose({ type: 'home' }) }, 'Live TV')];
+    if (s.type === 'fav') parts.push(h('span', {}, 'Favorites'));
+    else if (s.type === 'all') parts.push(h('span', {}, 'All channels'));
+    else if (s.type === 'region') parts.push(s.list ? h('span', {}, s.id) : h('span', {}, s.id));
+    else if (s.type === 'cat') { const c = catById.get(s.id); if (c && c.region !== 'Other') parts.push(h('button', { onclick: () => choose({ type: 'region', id: c.region }) }, c.region)); parts.push(h('span', {}, c ? c.label : '')); }
+    el.replaceChildren(...parts.flatMap((p, i) => (i ? [h('i', { class: 'sepc' }, '›'), p] : [p])));
+  }
+  function tiles() {
+    const s = state.sel, tile = (label, count, click, cls = '') => h('button', { class: 'tile ' + cls, onclick: click }, h('b', {}, label), h('small', {}, `${n(count)} channels`));
+    if (s.type === 'home') {
+      const total = shownCats().reduce((a, c) => a + c.count, 0);
+      return h('div', { class: 'tiles' }, tile('★ Favorites', fav.size, () => choose({ type: 'fav' }), 'accent'), tile('All channels', total, () => choose({ type: 'all' })), ...regions().map((r) => tile(r.name, r.count, () => choose({ type: 'region', id: r.name }))));
+    }
+    const r = regions().find((x) => x.name === s.id);
+    return h('div', { class: 'tiles' }, tile(`All ${s.id}`, r ? r.count : 0, () => choose({ type: 'region', id: s.id, list: true }), 'accent'), ...(r ? r.cats : []).map((c) => tile(c.label, c.count, () => choose({ type: 'cat', id: c.id }))));
+  }
+
+  // --- the channel list (shared) ---
+  function fillList() {
+    rowsObs && rowsObs.disconnect();
+    const s = state.sel;
+    if (cfg.liveLayout === 'drilldown' && !state.q.trim() && (s.type === 'home' || (s.type === 'region' && !s.list))) { listBox.replaceChildren(tiles()); return; }
+    const rows = pool();
+    const body = h('div', { class: 'rows' });
+    listBox.replaceChildren(h('div', { class: 'live-head' }, h('h2', {}, title()), h('span', { class: 'count' }, n(rows.length))),
+      h('div', { class: 'live-cols' }, h('span', { class: 'c-ch' }, 'Channel'), h('span', { class: 'c-now' }, 'On now'), h('span', { class: 'c-next' }, 'Up next')), body);
+    if (!rows.length) { body.append(h('div', { class: 'empty' }, state.q.trim() ? 'No channels match your search.' : s.type === 'fav' ? 'No favorites yet. Tap ☆ on a channel to add it.' : 'No channels here.')); return; }
+    const playable = rows.filter((c) => !isSep(c.name));
+    let shown = 0; const pending = new Set(); let timer;
+    rowsObs = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        if (e.target.classList.contains('sentinel')) { more(); continue; }
+        pending.add(Number(e.target.dataset.id)); rowsObs.unobserve(e.target);
       }
-      more();
+      clearTimeout(timer);
+      timer = setTimeout(async () => { const ids = [...pending]; pending.clear(); if (!ids.length) return; await fetchEpg(ids); ids.forEach(paint); }, 150);
+    }, { rootMargin: '300px' });
+    const sentinel = h('div', { class: 'sentinel' });
+    function more() {
+      sentinel.remove();
+      for (const ch of rows.slice(shown, shown + PAGE)) {
+        if (isSep(ch.name)) { body.append(h('div', { class: 'chsep' }, cleanLabel(ch.name))); continue; }
+        const r = row(ch, playable); body.append(r); rowsObs.observe(r);
+      }
+      shown += PAGE;
+      if (shown < rows.length) { body.append(sentinel); rowsObs.observe(sentinel); }
     }
+    more();
+  }
 
-    function row(ch) {
-      const logo = h('span', { class: 'logo' }, ch.logo ? h('img', { src: ch.logo, alt: '', loading: 'lazy', onerror: (e) => e.target.replaceWith(initials(ch.name)) }) : initials(ch.name));
-      const star = h('button', { class: 'star' + (fav.has(ch.id) ? ' on' : ''), title: 'Favorite', onclick: (e) => { e.stopPropagation(); toggleFav(ch.id); } });
-      setIcon(star, fav.has(ch.id) ? 'starFill' : 'star');
-      const el = h('div', { class: 'ch', tabindex: 0, 'data-id': ch.id, onclick: () => play(ch, rows), onkeydown: (e) => { if (e.key === 'Enter') play(ch, rows); } },
-        h('span', { class: 'num' }, ch.num), logo,
-        h('span', { class: 'info' }, h('b', { class: 'name' }, ch.name), h('span', { class: 'now' }), h('i', { class: 'bar' }, h('u'))), star);
-      paintRow(el, ch.id);
-      return el;
-    }
-    function paintRow(el, id) {
-      const p = nowOf((epg.get(id) || {}).list);
-      el.querySelector('.now').textContent = p ? `${p.title} · until ${clock(p.end)}` : '';
-      el.querySelector('.bar u').style.width = p ? `${Math.min(100, ((Date.now() - p.start) / (p.end - p.start)) * 100)}%` : '0';
-      el.querySelector('.bar').style.visibility = p ? 'visible' : 'hidden';
-    }
-    const paint = (id) => { const el = list.querySelector(`.ch[data-id="${id}"]`); if (el) paintRow(el, id); };
+  function row(ch, playable) {
+    const name = disp(ch);
+    const logo = h('span', { class: 'logo' }, ch.logo ? h('img', { src: ch.logo, alt: '', loading: 'lazy', onerror: (e) => e.target.replaceWith(initials(name)) }) : initials(name));
+    const star = h('button', { class: 'star' + (fav.has(ch.id) ? ' on' : ''), title: 'Favorite', onclick: (e) => { e.stopPropagation(); toggleFav(ch.id); } });
+    setIcon(star, fav.has(ch.id) ? 'starFill' : 'star');
+    const el = h('div', { class: 'ch', tabindex: 0, 'data-id': ch.id, title: ch.name, onclick: () => play(ch, playable), onkeydown: (e) => { if (e.key === 'Enter') play(ch, playable); } },
+      h('span', { class: 'num' }, ch.num), logo, h('b', { class: 'name' }, name),
+      h('span', { class: 'gnow' }, h('span', { class: 't' }), h('span', { class: 'tm' }), h('i', { class: 'bar' }, h('u'))),
+      h('span', { class: 'gnext' }, h('span', { class: 't' }), h('span', { class: 'tm' })), star);
+    paintRow(el, ch.id);
+    return el;
+  }
+  function paintRow(el, id) {
+    const list = (epg.get(id) || {}).list, p = nowOf(list), nx = nextOf(list);
+    const left = p ? Math.max(1, Math.round((p.end - Date.now()) / 60000)) : 0;
+    el.querySelector('.gnow .t').textContent = p ? p.title : '';
+    el.querySelector('.gnow .tm').textContent = p ? `${clock(p.start)} – ${clock(p.end)} · ${left >= 60 ? `${Math.floor(left / 60)}h ${left % 60}m` : `${left} min`} left` : (list ? 'No programme info' : '');
+    el.querySelector('.gnow .bar u').style.width = p ? `${Math.min(100, ((Date.now() - p.start) / (p.end - p.start)) * 100)}%` : '0';
+    el.querySelector('.gnow .bar').style.visibility = p ? 'visible' : 'hidden';
+    el.querySelector('.gnext .t').textContent = nx ? nx.title : '';
+    el.querySelector('.gnext .tm').textContent = nx ? clock(nx.start) : '';
+  }
+  const paint = (id) => { const el = listBox && listBox.querySelector(`.ch[data-id="${id}"]`); if (el) paintRow(el, id); };
 
-    async function toggleFav(id) {
-      try { fav = new Set((await api('/live/favorite', { id })).favorites); } catch (e) { return toast(e.message); }
-      drawRail();
-      if (state.cat === 'fav') drawList();
-      else list.querySelectorAll(`.ch[data-id="${id}"] .star`).forEach((b) => { b.classList.toggle('on', fav.has(id)); setIcon(b, fav.has(id) ? 'starFill' : 'star'); });
-    }
-    Live.toggleFav = toggleFav;
+  async function toggleFav(id) {
+    try { fav = new Set((await api('/live/favorite', { id })).favorites); } catch (e) { return toast(e.message); }
+    if (state.sel.type === 'fav' && !state.q.trim()) draw();
+    else document.querySelectorAll(`.ch[data-id="${id}"] .star`).forEach((b) => { b.classList.toggle('on', fav.has(id)); setIcon(b, fav.has(id) ? 'starFill' : 'star'); });
+    if (cfg.liveLayout === 'grouped') { const f = [...document.querySelectorAll('.live-rail .cat')].find((b) => /Favorites/.test(b.textContent)); if (f) f.querySelector('small').textContent = n(fav.size); }
+  }
 
-    drawRail(); drawList();
-    root.replaceChildren(h('div', { class: 'live' }, rail, list));
+  // --- hide the categories you never watch (there can be hundreds) ---
+  function manageCategories() {
+    const q = h('input', { type: 'search', placeholder: 'Find a category', autocomplete: 'off' });
+    const list = h('div', { class: 'mc-list' });
+    const modal = h('div', { class: 'modal', onclick: (e) => { if (e.target === modal) done(); } },
+      h('div', { class: 'modal-card' },
+        h('div', { class: 'mc-head' }, h('h2', {}, 'Manage categories'), h('button', { class: 'btn sm', onclick: done }, 'Done')),
+        h('p', { class: 'subtle', style: 'margin:0 0 10px' }, 'Untick the categories you don’t want. Hidden ones disappear from the list and from search.'), q, list));
+    async function setHidden(ids, hide) {
+      try { hidden = new Set((await api('/live/hide', { ids, hide })).hidden); } catch (e) { toast(e.message); }
+      paintList();
+    }
+    function paintList() {
+      const term = q.value.trim().toLowerCase(), byRegion = new Map();
+      for (const c of cats) { if (term && !(c.region + ' ' + c.label).toLowerCase().includes(term)) continue; if (!byRegion.has(c.region)) byRegion.set(c.region, []); byRegion.get(c.region).push(c); }
+      const groups = [...byRegion.entries()].sort((a, b) => (a[0] === 'Other') - (b[0] === 'Other') || a[0].localeCompare(b[0]));
+      list.replaceChildren(...groups.flatMap(([region, items]) => {
+        const allShown = items.every((c) => !hidden.has(c.id));
+        return [h('div', { class: 'mc-region' }, h('b', {}, region), h('small', {}, `${items.length}`), h('span', { class: 'grow' }),
+          h('button', { class: 'btn ghost sm', onclick: () => setHidden(items.map((c) => c.id), allShown) }, allShown ? 'Hide all' : 'Show all')),
+          ...items.map((c) => h('label', { class: 'mc-item' }, h('input', { type: 'checkbox', checked: !hidden.has(c.id), onchange: (e) => setHidden([c.id], !e.target.checked) }), h('span', {}, c.label), h('small', {}, n(c.count))))];
+      }));
+      if (!groups.length) list.append(h('div', { class: 'subtle' }, 'No matching categories.'));
+    }
+    q.oninput = paintList;
+    function done() { modal.remove(); const s = state.sel; if (s.type === 'cat' && hidden.has(s.id)) state.sel = { type: 'all' }; draw(); }
+    document.body.append(modal); paintList(); q.focus();
   }
 
   // ---------- the player ----------
@@ -138,10 +291,10 @@ const Live = (() => {
   function tune() {
     current = playlist[idx];
     if (!current) return;
-    $('#lpName').textContent = `${current.num} · ${current.name}`;
+    $('#lpName').textContent = `${current.num} · ${disp(current)}`;
     $('#lpNow').textContent = '';
     setFavIcon();
-    status('spin', `Tuning to ${current.name}…`);
+    status('spin', `Tuning to ${disp(current)}…`);
     video.src = `/api/live/stream/${current.id}`;   // switching src drops the old request, which stops the old ffmpeg
     video.play().catch(() => {});
     clearTimeout(startTimer);
@@ -155,7 +308,7 @@ const Live = (() => {
     const list = (epg.get(current.id) || {}).list, now = nowOf(list), next = nextOf(list);
     $('#lpNow').textContent = now ? now.title : '';
     $('#lpInfo').replaceChildren(
-      h('div', { class: 'lp-ch' }, `${current.num} · ${current.name}`),
+      h('div', { class: 'lp-ch' }, `${current.num} · ${disp(current)}`),
       now ? h('div', {}, h('div', { class: 'lp-title' }, now.title), h('div', { class: 'lp-time' }, `${clock(now.start)} – ${clock(now.end)}`),
         h('i', { class: 'bar' }, h('u', { style: `width:${Math.min(100, ((Date.now() - now.start) / (now.end - now.start)) * 100)}%` })),
         now.desc && h('div', { class: 'lp-desc' }, now.desc)) : h('div', { class: 'lp-time' }, 'No programme information'),
@@ -204,5 +357,5 @@ const Live = (() => {
   });
   addEventListener('hashchange', close);
 
-  return { view, toggleFav: null };
+  return { view, toggleFav };
 })();

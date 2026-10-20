@@ -430,6 +430,16 @@ async function settings() {
   const save = (patch) => api('/config', patch).catch((e) => toast(e.message));
   const modeSeg = h('div', { class: 'seg' });
   const swatches = h('div', { class: 'themes' });
+  // Live TV display options apply immediately and are saved as you click
+  const liveOpts = { size: cfg.liveTextSize || 'large', layout: cfg.liveLayout || 'grouped' };
+  const sizeSeg = h('div', { class: 'seg' }), layoutSeg = h('div', { class: 'seg' });
+  function drawLiveOpts() {
+    const seg = (el, pairs, key, field, after) => el.replaceChildren(...pairs.map(([v, label]) =>
+      h('button', { type: 'button', class: liveOpts[key] === v ? 'on' : '', onclick: () => { liveOpts[key] = v; api('/config', { [field]: v }).catch((e) => toast(e.message)); after && after(v); drawLiveOpts(); } }, label)));
+    seg(sizeSeg, [['standard', 'Standard'], ['large', 'Large'], ['xlarge', 'Extra large']], 'size', 'liveTextSize', (v) => { document.documentElement.dataset.livesize = v; });
+    seg(layoutSeg, [['grouped', 'Grouped'], ['dropdowns', 'Dropdowns'], ['drilldown', 'Drill-down']], 'layout', 'liveLayout');
+  }
+  drawLiveOpts();
   const blackBox = h('input', { type: 'checkbox', checked: appearance.black, onchange: () => { applyAppearance({ black: blackBox.checked }); save({ pureBlack: blackBox.checked }); drawAppearance(); } });
   const blackRow = h('label', { class: 'check' }, blackBox, h('div', {}, h('div', {}, 'True black background'), h('small', { class: 'subtle' }, 'Dark mode only. Saves power on OLED screens.')));
   function drawAppearance() {
@@ -461,7 +471,11 @@ async function settings() {
       field('Server URL', text('xtreamUrl', 'text', 'http://example.com:8080')),
       field('Username', text('xtreamUser', 'text', '')),
       field(`Password${cfg.hasXtreamPass ? ' — saved' : ''}`, text('xtreamPass', 'password', cfg.hasXtreamPass ? 'Leave blank to keep the saved password' : '')),
-      h('div', { class: 'row2' }, h('button', { type: 'button', class: 'btn ghost sm', onclick: testLive }, 'Test connection'), liveTest)),
+      h('div', { class: 'row2' }, h('button', { type: 'button', class: 'btn ghost sm', onclick: testLive }, 'Test connection'), liveTest),
+      h('div', { class: 'row2' }, h('span', {}, 'Text size'), sizeSeg),
+      h('div', { class: 'row2' }, h('span', {}, 'Category list'), layoutSeg),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: cfg.liveTidyNames !== false, onchange: (e) => api('/config', { liveTidyNames: e.target.checked }).catch((err) => toast(err.message)) }),
+        h('div', {}, h('div', {}, 'Tidy channel names'), h('small', { class: 'subtle' }, 'Remove country prefixes like “US|” (the category already shows the country).')))),
     h('div', { class: 'card2' }, h('h2', {}, 'Streams'),
       field('Native language', select('nativeLanguage', info.languages), 'Only streams with this audio are chosen.'),
       field('Starting quality', select('preferredResolution', { '2160p': '4K', '1080p': '1080p', '720p': '720p', '480p': '480p' }), 'Used by the Play button. You can change it any time in the player.'),

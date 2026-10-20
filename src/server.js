@@ -263,7 +263,8 @@ function createServer(port) {
       try {
         const x = xtream.clientFor(cfg);
         const [categories, channels] = await Promise.all([x.categories(), x.channels()]);
-        return { configured: true, categories, channels, favorites: config.loadData().liveFavorites || [] };
+        const d = config.loadData();
+        return { configured: true, categories, channels, favorites: d.liveFavorites || [], hidden: d.liveHiddenCats || [] };
       } catch (e) { throw new HttpError(502, e.message); }
     },
     // What's on now/next for a batch of channels (the page asks for the ones on screen).
@@ -278,6 +279,17 @@ function createServer(port) {
         while (next < ids.length) { const id = ids[next++]; try { out[id] = await x.epg(id); } catch { out[id] = []; } }
       }));
       return out;
+    },
+    // Hide (or show again) categories the user doesn't want to see; with hundreds of them this is the main tidy-up.
+    async 'POST /api/live/hide'(req) {
+      const b = await readBody(req);
+      const ids = (Array.isArray(b.ids) ? b.ids : []).map(String).filter((x) => /^\d+$/.test(x)).slice(0, 5000);
+      const data = config.loadData();
+      const hidden = new Set(data.liveHiddenCats || []);
+      for (const id of ids) b.hide ? hidden.add(id) : hidden.delete(id);
+      data.liveHiddenCats = [...hidden];
+      config.saveData(data);
+      return { hidden: data.liveHiddenCats };
     },
     async 'POST /api/live/favorite'(req) {
       const id = Number((await readBody(req)).id);

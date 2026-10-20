@@ -19,6 +19,9 @@ const DEFAULTS = {
   xtreamUrl: '',               // Live TV (Xtream Codes) server, e.g. http://host:8080
   xtreamUser: '',
   xtreamPass: '',
+  liveLayout: 'grouped',       // Live TV sidebar: grouped | dropdowns | drilldown
+  liveTextSize: 'large',       // Live TV text: standard | large | xlarge
+  liveTidyNames: true,         // drop country prefixes like "US| " from channel names
   tmdbKey: '',                 // optional: enables "More in this collection" (sequels) on movie pages
   torrentioUrl: '',            // optional: a full Torrentio manifest/config URL
   nativeLanguage: systemLanguage(),
@@ -64,7 +67,7 @@ function saveConfig(patch) {
   return next;
 }
 
-const DATA_DEFAULTS = { library: [], progress: {}, watched: {}, pinned: [], liveFavorites: [] };
+const DATA_DEFAULTS = { library: [], progress: {}, watched: {}, pinned: [], liveFavorites: [], liveHiddenCats: [] };
 function loadData() { return { ...DATA_DEFAULTS, ...readJson(dataFile, {}) }; }
 function saveData(data) { writeJson(dataFile, data); }
 

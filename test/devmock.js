@@ -37,8 +37,13 @@ http.createServer((req, res) => {
     const q = u.searchParams, act = q.get('action');
     if (q.get('username') !== 'u' || q.get('password') !== 'p') return json({ user_info: { auth: 0 } });
     if (!act) return json({ user_info: { auth: 1, status: 'Active', exp_date: String(Math.floor(Date.now() / 1000) + 86400 * 30), max_connections: '2' } });
-    if (act === 'get_live_categories') return json([{ category_id: '1', category_name: 'News' }, { category_id: '2', category_name: 'Sports' }, { category_id: '3', category_name: 'Movies' }]);
-    if (act === 'get_live_streams') return json(Array.from({ length: 12 }, (_, i) => ({ num: i + 1, name: ['News One', 'World News', 'Sports HD', 'Arena Sports', 'Movie Max', 'Cinema Classics', 'News Today', 'Sports Extra', 'Film Four', 'Kids Zone', 'Nature TV', 'Music Hits'][i], stream_id: 101 + i, stream_icon: '', category_id: String(i % 3 + 1) })));
+    if (act === 'get_live_categories') return json([{ category_id: '1', category_name: 'US| NEWS NETWORK' }, { category_id: '2', category_name: 'US| SPORTS NETWORK' }, { category_id: '3', category_name: 'UK| MOVIES' }, { category_id: '4', category_name: 'WORLD LIVE SPORTS' }]);
+    if (act === 'get_live_streams') {
+      const names = ['News One', 'World News', 'Sports HD', 'Arena Sports', 'Movie Max', 'Cinema Classics', 'News Today', 'Sports Extra', 'Film Four', 'Kids Zone', 'Nature TV', 'Music Hits'];
+      const list = names.map((n, i) => ({ num: i + 1, name: (i % 3 === 2 ? 'UK| ' : 'US| ') + n.toUpperCase(), stream_id: 101 + i, stream_icon: '', category_id: String(i % 3 + 1) }));
+      list.push({ num: 13, name: '##### SPORTS #####', stream_id: 113, stream_icon: '', category_id: '2' }, { num: 14, name: 'World Cup Live', stream_id: 114, stream_icon: '', category_id: '4' });
+      return json(list);
+    }
     if (act === 'get_short_epg') {
       const b64 = (t) => Buffer.from(t).toString('base64'), now = Math.floor(Date.now() / 1000), id = q.get('stream_id');
       return json({ epg_listings: [[-1200, 2400, 'Morning Show'], [2400, 6000, 'Evening News'], [6000, 9600, 'Late Movie']].map(([a, z, t]) => ({ title: b64(`${t} ${id}`), description: b64(`About ${t}.`), start_timestamp: String(now + a), stop_timestamp: String(now + z) })) });
