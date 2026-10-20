@@ -21,6 +21,7 @@ test('Live TV end to end against a mock Xtream server', { skip: !haveFfmpeg && '
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-live-'));
   spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=d=6:s=320x180:r=25', '-f', 'lavfi', '-i', 'sine=f=500:d=6', '-c:v', 'mpeg2video', '-c:a', 'mp2', '-f', 'mpegts', path.join(dir, 'live.ts')]);
   const mock = spawn('node', [path.join(__dirname, 'devmock.js'), '7991'], { env: { ...process.env, MOCK_VIDEO_DIR: dir }, stdio: 'ignore' });
+  process.env.STREAMSNAP_LIVE_DEADLINE = '4000';
   t.after(() => mock.kill());
   await new Promise((r) => setTimeout(r, 700));
 
@@ -43,7 +44,7 @@ test('Live TV end to end against a mock Xtream server', { skip: !haveFfmpeg && '
   assert.equal((await (await fetch(base + '/api/config')).json()).hasXtreamPass, true);
 
   const b = await (await fetch(base + '/api/live/browse')).json();
-  assert.equal(b.channels.length, 14); assert.deepEqual(b.categories.map((c) => c.name), ['US| NEWS NETWORK', 'US| SPORTS NETWORK', 'UK| MOVIES', 'WORLD LIVE SPORTS']);
+  assert.equal(b.channels.length, 16); assert.deepEqual(b.categories.map((c) => c.name), ['US| NEWS NETWORK', 'US| SPORTS NETWORK', 'UK| MOVIES', 'WORLD LIVE SPORTS']);
   assert.deepEqual((await (await post('/api/live/hide', { ids: ['4', 'x'], hide: true })).json()).hidden, ['4']);
   assert.deepEqual((await (await fetch(base + '/api/live/browse')).json()).hidden, ['4']);
   assert.deepEqual((await (await post('/api/live/hide', { ids: ['4'], hide: false })).json()).hidden, []);
@@ -53,6 +54,13 @@ test('Live TV end to end against a mock Xtream server', { skip: !haveFfmpeg && '
 
   assert.deepEqual((await (await post('/api/live/favorite', { id: 103 })).json()).favorites, [103]);
   assert.deepEqual((await (await post('/api/live/favorite', { id: 103 })).json()).favorites, []);
+
+  // a channel that isn't live fails with a clear message instead of buffering forever
+  const gone = await fetch(base + '/api/live/stream/116');
+  assert.equal(gone.status, 502); assert.match((await gone.json()).error, /isn't available/);
+  const quiet = await fetch(base + '/api/live/stream/115');         // connects but never sends data
+  assert.equal(quiet.status, 504); assert.match((await quiet.json()).error, /isn't broadcasting/);
+  assert.match((await (await fetch(base + '/api/live/why?id=115')).json()).reason, /isn't broadcasting/);
 
   // the stream: MPEG-2/MP2 in, browser-playable fragmented MP4 (H.264 + Opus) out
   const res = await fetch(base + '/api/live/stream/101');

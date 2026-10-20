@@ -281,11 +281,15 @@ const Live = (() => {
   }
 
   function status(kind, msg, retry) {
-    const el = $('#lpStatus');
+    const el = $('#lpStatus'), root = $('#livePlayer');
     if (!kind) { el.hidden = true; return; }
     el.hidden = false; el.className = kind === 'err' ? 'err2' : '';
-    el.replaceChildren(h('div', {}, kind === 'spin' && h('div', { class: 'spinner' }), h('div', {}, msg),
-      retry && h('button', { class: 'btn', style: 'margin-top:14px', onclick: retry }, 'Try again')));
+    root.classList.remove('idle'); // never hide the controls while something is wrong or loading
+    el.replaceChildren(h('div', {}, kind === 'spin' && h('div', { class: 'spinner' }), h('div', { class: 'lp-msg' }, msg),
+      kind === 'err' && h('div', { class: 'btns' },
+        retry && h('button', { class: 'btn', onclick: retry }, 'Try again'),
+        playlist.length > 1 && h('button', { class: 'btn ghost', onclick: () => zap(1) }, 'Next channel ↓'),
+        h('button', { class: 'btn ghost', onclick: close }, 'Back to channels'))));
   }
 
   function tune() {
@@ -297,8 +301,7 @@ const Live = (() => {
     status('spin', `Tuning to ${disp(current)}…`);
     video.src = `/api/live/stream/${current.id}`;   // switching src drops the old request, which stops the old ffmpeg
     video.play().catch(() => {});
-    clearTimeout(startTimer);
-    startTimer = setTimeout(() => { if (video.readyState < 2) status('err', 'This channel is taking a long time to start. The provider may be busy or you may be at your connection limit.', tune); }, 30000);
+    watchdog(35000);
     const mine = current;
     fetchEpg([current.id]).then(() => { if (current === mine) info(); });
     info(); wake(true);
@@ -307,27 +310,42 @@ const Live = (() => {
   function info() {
     const list = (epg.get(current.id) || {}).list, now = nowOf(list), next = nextOf(list);
     $('#lpNow').textContent = now ? now.title : '';
-    $('#lpInfo').replaceChildren(
+    $('#lpInfo').replaceChildren(...[
       h('div', { class: 'lp-ch' }, `${current.num} · ${disp(current)}`),
       now ? h('div', {}, h('div', { class: 'lp-title' }, now.title), h('div', { class: 'lp-time' }, `${clock(now.start)} – ${clock(now.end)}`),
         h('i', { class: 'bar' }, h('u', { style: `width:${Math.min(100, ((Date.now() - now.start) / (now.end - now.start)) * 100)}%` })),
         now.desc && h('div', { class: 'lp-desc' }, now.desc)) : h('div', { class: 'lp-time' }, 'No programme information'),
-      next && h('div', { class: 'lp-next' }, `Next · ${clock(next.start)}  ${next.title}`));
+      next && h('div', { class: 'lp-next' }, `Next · ${clock(next.start)}  ${next.title}`)].filter(Boolean));
   }
 
   const setFavIcon = () => { const b = $('#lpFav'); b.classList.toggle('on', fav.has(current.id)); setIcon(b.firstElementChild, fav.has(current.id) ? 'starFill' : 'star'); };
   const zap = (d) => { if (playlist.length > 1) { idx = (idx + d + playlist.length) % playlist.length; tune(); } };
 
+  /** Give up on a channel that never starts or stalls for too long, and free the provider connection. */
+  function watchdog(ms) {
+    clearTimeout(startTimer);
+    startTimer = setTimeout(() => giveUp('This channel isn’t responding. The provider may be busy, or you may be at your connection limit.'), ms);
+  }
+  function giveUp(msg) {
+    clearTimeout(startTimer);
+    video.removeAttribute('src'); video.load();
+    status('err', msg, tune);
+  }
   video.addEventListener('playing', () => { clearTimeout(startTimer); status(null); });
-  video.addEventListener('waiting', () => status('spin', 'Buffering…'));
-  video.addEventListener('error', () => { if (video.getAttribute('src')) status('err', 'Couldn’t play this channel. Try another one, or try again in a moment.', tune); });
+  video.addEventListener('waiting', () => { status('spin', 'Buffering…'); watchdog(25000); });
+  video.addEventListener('error', async () => {
+    if (!video.getAttribute('src') || !current) return;
+    const id = current.id;
+    const r = await api('/live/why?id=' + id).catch(() => null);
+    if (current && current.id === id) giveUp((r && r.reason) || 'Couldn’t play this channel.');
+  });
   video.addEventListener('click', () => wake(true));
   video.addEventListener('dblclick', () => fullscreen());
 
   function wake(showInfo) {
     const root = $('#livePlayer');
     root.classList.remove('idle'); root.classList.toggle('show-info', !!showInfo);
-    clearTimeout(idle); idle = setTimeout(() => root.classList.add('idle'), 4000);
+    clearTimeout(idle); idle = setTimeout(() => { if ($('#lpStatus').hidden) root.classList.add('idle'); }, 4000);
   }
   const fullscreen = () => (document.fullscreenElement ? document.exitFullscreen() : $('#livePlayer').requestFullscreen().catch(() => {}));
 

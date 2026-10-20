@@ -389,3 +389,8 @@ select option { background:var(--s2); color:var(--fg); }
 #lpStatus { position:absolute; inset:0; display:grid; place-items:center; text-align:center; pointer-events:none; padding:24px; }
 #lpStatus.err2 { background:rgba(0,0,0,.7); pointer-events:auto; }
 #lpStatus .spinner { width:54px; height:54px; border:4px solid rgba(255,255,255,.2); border-top-color:var(--accent2); border-radius:50%; animation:spin .9s linear infinite; margin:0 auto 14px; }
+
+/* Live player: controls stay clickable above the loading / error overlay */
+.lp-top, .lp-bottom { z-index:3; } #lpStatus { z-index:2; }
+#lpStatus .btns { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:16px; }
+#lpStatus .lp-msg { max-width:30em; margin:0 auto; line-height:1.5; }

@@ -291,6 +291,7 @@ function createServer(port) {
       config.saveData(data);
       return { hidden: data.liveHiddenCats };
     },
+    async 'GET /api/live/why'(req, q) { return { reason: live.why(q.get('id')) }; },
     async 'POST /api/live/favorite'(req) {
       const id = Number((await readBody(req)).id);
       if (!Number.isInteger(id)) throw new HttpError(400, 'bad channel');

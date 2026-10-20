@@ -41,7 +41,7 @@ http.createServer((req, res) => {
     if (act === 'get_live_streams') {
       const names = ['News One', 'World News', 'Sports HD', 'Arena Sports', 'Movie Max', 'Cinema Classics', 'News Today', 'Sports Extra', 'Film Four', 'Kids Zone', 'Nature TV', 'Music Hits'];
       const list = names.map((n, i) => ({ num: i + 1, name: (i % 3 === 2 ? 'UK| ' : 'US| ') + n.toUpperCase(), stream_id: 101 + i, stream_icon: '', category_id: String(i % 3 + 1) }));
-      list.push({ num: 13, name: '##### SPORTS #####', stream_id: 113, stream_icon: '', category_id: '2' }, { num: 14, name: 'World Cup Live', stream_id: 114, stream_icon: '', category_id: '4' });
+      list.push({ num: 15, name: 'US| PPV EVENT (NOT LIVE)', stream_id: 115, stream_icon: '', category_id: '4' }, { num: 16, name: 'US| MISSING', stream_id: 116, stream_icon: '', category_id: '4' }, { num: 13, name: '##### SPORTS #####', stream_id: 113, stream_icon: '', category_id: '2' }, { num: 14, name: 'World Cup Live', stream_id: 114, stream_icon: '', category_id: '4' });
       return json(list);
     }
     if (act === 'get_short_epg') {
@@ -49,6 +49,8 @@ http.createServer((req, res) => {
       return json({ epg_listings: [[-1200, 2400, 'Morning Show'], [2400, 6000, 'Evening News'], [6000, 9600, 'Late Movie']].map(([a, z, t]) => ({ title: b64(`${t} ${id}`), description: b64(`About ${t}.`), start_timestamp: String(now + a), stop_timestamp: String(now + z) })) });
     }
   }
+  if (u.pathname === '/live/u/p/115.ts') { res.writeHead(200, { 'content-type': 'video/mp2t' }); return; } // off air: connects, then never sends anything
+  if (u.pathname === '/live/u/p/116.ts') { res.writeHead(404); return res.end(); }
   if (/^\/live\/u\/p\/\d+\.ts$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'video/mp2t' }); return fs.createReadStream(path.join(dir, 'live.ts')).pipe(res); }
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
   if (u.pathname === '/meta/movie/tt0000003.json') return json({ meta: { ...movie, id: 'tt0000003', imdb_id: 'tt0000003', name: 'Only French' } });
