@@ -271,8 +271,6 @@ const Live = (() => {
   // ---------- the player ----------
   const video = $('#liveVideo');
   let idle, infoTimer, startTimer;
-  let audioDelay = Number(localStorage.getItem('ss.liveAudioDelay') || 0);
-  let syncTimer;
 
   function play(ch, list) {
     if (!(window.APPINFO || {}).players?.ffmpeg) return toast('Live TV needs ffmpeg installed (sudo dnf install ffmpeg, or apt install ffmpeg).');
@@ -301,7 +299,7 @@ const Live = (() => {
     $('#lpNow').textContent = '';
     setFavIcon();
     status('spin', `Tuning to ${disp(current)}…`);
-    video.src = `/api/live/stream/${current.id}` + (audioDelay ? `?a=${audioDelay}` : '');   // switching src drops the old request, which stops the old ffmpeg
+    video.src = `/api/live/stream/${current.id}?t=${Date.now()}`; // fresh connection every time, so a refresh really restarts it   // switching src drops the old request, which stops the old ffmpeg
     video.play().catch(() => {});
     watchdog(35000);
     const mine = current;
@@ -405,18 +403,9 @@ const Live = (() => {
   }
   function tuneTo(i) { if (i === idx) { closeGuide(); return; } idx = i; closeGuide(); tune(); }
 
-  // Audio sync: nudge the sound earlier/later; the channel reconnects (a second or two) to apply it.
-  const showDelay = () => { $('#lpSyncVal').textContent = `${audioDelay > 0 ? '+' : ''}${audioDelay} ms`; $('#lpSync').classList.toggle('on', audioDelay !== 0); };
-  function nudge(d) {
-    audioDelay = Math.max(-5000, Math.min(5000, audioDelay + d)); showDelay();
-    try { localStorage.setItem('ss.liveAudioDelay', audioDelay); } catch { /* optional */ }
-    clearTimeout(syncTimer); syncTimer = setTimeout(() => current && tune(), 700);
-  }
-  $('#lpSyncMinus').onclick = () => nudge(-100);
-  $('#lpSyncPlus').onclick = () => nudge(100);
-  $('#lpSync').onclick = (e) => { e.stopPropagation(); $('#lpSyncMenu').hidden = !$('#lpSyncMenu').hidden; };
-  $('#livePlayer').addEventListener('click', (e) => { if (!e.target.closest('.menuwrap')) $('#lpSyncMenu').hidden = true; });
-  showDelay();
+  // Refresh: drop the connection and start the channel again. A fresh start re-aligns picture and sound.
+  function refresh() { if (!current) return; toast('Refreshing stream…'); tune(); }
+  $('#lpRefresh').onclick = refresh;
 
   $('#lgClose').onclick = closeGuide;
   $('#lpInfo').addEventListener('click', openGuide);
@@ -485,6 +474,7 @@ const Live = (() => {
     else if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); zap(1); }
     else if (e.key.toLowerCase() === 'f') fullscreen();
     else if (e.key.toLowerCase() === 'm') $('#lpMute').click();
+    else if (e.key.toLowerCase() === 'r') refresh();
     else if (e.key === 'Escape' && !document.fullscreenElement) close();
   });
   addEventListener('hashchange', close);
