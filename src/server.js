@@ -271,12 +271,13 @@ function createServer(port) {
     async 'GET /api/live/epg'(req, q) {
       const cfg = config.loadConfig();
       const ids = [...new Set((q.get('ids') || '').split(',').map(Number).filter(Number.isInteger))].slice(0, 30);
+      const limit = Math.min(20, Math.max(2, Number(q.get('limit')) || 4));
       const out = {};
       if (!cfg.xtreamUrl || !ids.length) return out;
       const x = xtream.clientFor(cfg);
       let next = 0;
       await Promise.all(Array.from({ length: 6 }, async () => {
-        while (next < ids.length) { const id = ids[next++]; try { out[id] = await x.epg(id); } catch { out[id] = []; } }
+        while (next < ids.length) { const id = ids[next++]; try { out[id] = await x.epg(id, limit); } catch { out[id] = []; } }
       }));
       return out;
     },

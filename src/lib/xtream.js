@@ -73,9 +73,9 @@ class Xtream {
   }
 
   /** Current and upcoming programmes: [{ title, desc, start, end }] with epoch-ms times. */
-  epg(id) {
-    return this.cached(`epg:${id}`, EPG_TTL, async () => {
-      const j = await this.api('get_short_epg', { stream_id: String(id), limit: '4' });
+  epg(id, limit = 4) {
+    return this.cached(`epg:${id}:${limit}`, EPG_TTL, async () => {
+      const j = await this.api('get_short_epg', { stream_id: String(id), limit: String(limit) });
       const time = (stamp, text) => (Number(stamp) ? Number(stamp) * 1000 : Date.parse(String(text).replace(' ', 'T') + 'Z'));
       return (j.epg_listings || []).map((l) => ({ title: decodeText(l.title) || 'No title', desc: decodeText(l.description), start: time(l.start_timestamp, l.start), end: time(l.stop_timestamp, l.end) }))
         .filter((p) => Number.isFinite(p.start) && Number.isFinite(p.end)).sort((a, b) => a.start - b.start);

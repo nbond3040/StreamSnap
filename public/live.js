@@ -315,8 +315,98 @@ const Live = (() => {
       now ? h('div', {}, h('div', { class: 'lp-title' }, now.title), h('div', { class: 'lp-time' }, `${clock(now.start)} – ${clock(now.end)}`),
         h('i', { class: 'bar' }, h('u', { style: `width:${Math.min(100, ((Date.now() - now.start) / (now.end - now.start)) * 100)}%` })),
         now.desc && h('div', { class: 'lp-desc' }, now.desc)) : h('div', { class: 'lp-time' }, 'No programme information'),
-      next && h('div', { class: 'lp-next' }, `Next · ${clock(next.start)}  ${next.title}`)].filter(Boolean));
+      next && h('div', { class: 'lp-next' }, `Next · ${clock(next.start)}  ${next.title}`),
+      h('div', { class: 'lp-hint' }, 'Channel guide ▸')].filter(Boolean));
   }
+
+  // ---------- channel guide overlay (click the channel info, or press G) ----------
+  const guideEl = $('#lpGuide');
+  let gSel = 0, gObs, gTimer, gStart = 0;
+  const sched = new Map(); // channel id -> { at, list } with a longer schedule than the list rows need
+  const guideOpen = () => !guideEl.hidden;
+
+  function openGuide() {
+    if (!current) return;
+    guideEl.hidden = false; $('#livePlayer').classList.remove('idle');
+    gSel = idx; gStart = Math.max(0, idx - 8);
+    drawGuide(); selectGuide(gSel, true);
+  }
+  function closeGuide() { guideEl.hidden = true; gObs && gObs.disconnect(); wake(false); }
+
+  function guideRow(i) {
+    const ch = playlist[i], name = disp(ch);
+    const logo = h('span', { class: 'logo' }, ch.logo ? h('img', { src: ch.logo, alt: '', loading: 'lazy', onerror: (e) => e.target.replaceWith(initials(name)) }) : initials(name));
+    const el = h('div', { class: 'lg-row' + (i === idx ? ' live-now' : ''), 'data-i': i, onclick: () => tuneTo(i), onmouseenter: () => selectGuide(i) },
+      h('span', { class: 'num' }, ch.num), logo, h('span', { class: 'who' }, h('b', {}, name), h('span', { class: 'now' }), h('i', { class: 'bar' }, h('u'))), h('span', { class: 'nx' }));
+    paintGuideRow(el, ch.id);
+    return el;
+  }
+  function paintGuideRow(el, id) {
+    const list = (epg.get(id) || {}).list, p = nowOf(list), nx = nextOf(list);
+    el.querySelector('.now').textContent = p ? `${p.title} · until ${clock(p.end)}` : '';
+    el.querySelector('.bar u').style.width = p ? `${Math.min(100, ((Date.now() - p.start) / (p.end - p.start)) * 100)}%` : '0';
+    el.querySelector('.bar').style.visibility = p ? 'visible' : 'hidden';
+    el.querySelector('.nx').textContent = nx ? `Next ${clock(nx.start)} · ${nx.title}` : '';
+  }
+  function drawGuide() {
+    gObs && gObs.disconnect();
+    const box = $('#lgList'); box.replaceChildren();
+    const pending = new Set(); let timer, end = gStart;
+    gObs = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        if (e.target.classList.contains('lg-more-bottom')) { addRows(); continue; }
+        pending.add(Number(playlist[Number(e.target.dataset.i)].id)); gObs.unobserve(e.target);
+      }
+      clearTimeout(timer);
+      timer = setTimeout(async () => { const ids = [...pending]; pending.clear(); if (!ids.length) return; await fetchEpg(ids); ids.forEach((id) => { const r = box.querySelector(`.lg-row[data-i="${playlist.findIndex((c) => c.id === id)}"]`); if (r) paintGuideRow(r, id); }); }, 120);
+    }, { root: box, rootMargin: '200px' });
+    const bottom = h('div', { class: 'lg-more-bottom' });
+    function addRows() {
+      bottom.remove();
+      for (let i = end; i < Math.min(playlist.length, end + 40); i++) { const r = guideRow(i); box.append(r); gObs.observe(r); }
+      end = Math.min(playlist.length, end + 40);
+      if (end < playlist.length) { box.append(bottom); gObs.observe(bottom); }
+    }
+    if (gStart > 0) box.append(h('button', { class: 'btn ghost sm lg-earlier', onclick: () => { const keep = gSel; gStart = Math.max(0, gStart - 40); drawGuide(); selectGuide(keep, true); } }, 'Earlier channels'));
+    addRows();
+    // make sure the highlighted row exists even if it is far down
+    while (end <= gSel && end < playlist.length) addRows();
+  }
+
+  function selectGuide(i, scroll) {
+    gSel = i;
+    $('#lgList').querySelectorAll('.lg-row.sel').forEach((r) => r.classList.remove('sel'));
+    const row = $('#lgList').querySelector(`.lg-row[data-i="${i}"]`);
+    if (row) { row.classList.add('sel'); if (scroll) row.scrollIntoView({ block: 'center' }); }
+    clearTimeout(gTimer); gTimer = setTimeout(() => showSchedule(playlist[i]), scroll ? 0 : 140);
+  }
+
+  async function showSchedule(ch) {
+    if (!ch) return;
+    const box = $('#lgSched'), name = disp(ch);
+    box.replaceChildren(h('div', { class: 'sc-title' }, h('b', {}, `${ch.num} · ${name}`), ch.id === (current || {}).id && h('span', { class: 'sc-badge' }, 'Watching')), h('div', { class: 'subtle' }, 'Loading schedule…'));
+    let list = (sched.get(ch.id) || {}).list;
+    if (!list || Date.now() - sched.get(ch.id).at > 3 * 60 * 1000) {
+      try { list = (await api(`/live/epg?ids=${ch.id}&limit=12`))[ch.id] || []; sched.set(ch.id, { at: Date.now(), list }); } catch { list = []; }
+    }
+    if (playlist[gSel] !== ch) return; // the highlight moved on
+    const now = Date.now();
+    const items = list.filter((p) => p.end > now);
+    box.replaceChildren(
+      h('div', { class: 'sc-title' }, h('b', {}, `${ch.num} · ${name}`), ch.id === (current || {}).id && h('span', { class: 'sc-badge' }, 'Watching')),
+      ...(items.length ? items.map((p, i) => h('div', { class: 'sc-item' + (p.start <= now ? ' now' : '') },
+        h('div', { class: 'sc-time' }, p.start <= now ? `Now · until ${clock(p.end)}` : `${clock(p.start)} – ${clock(p.end)}`),
+        h('div', { class: 'sc-name' }, p.title), i < 3 && p.desc && h('div', { class: 'sc-desc' }, p.desc)))
+        : [h('div', { class: 'subtle', style: 'margin-top:1em' }, 'No programme information for this channel.')]),
+      h('button', { class: 'btn', style: 'margin-top:1.2em', onclick: () => tuneTo(gSel) }, ch.id === (current || {}).id ? 'Keep watching' : 'Watch this channel'));
+  }
+  function tuneTo(i) { if (i === idx) { closeGuide(); return; } idx = i; closeGuide(); tune(); }
+
+  $('#lgClose').onclick = closeGuide;
+  $('#lpInfo').addEventListener('click', openGuide);
+  $('#lpName').parentElement.addEventListener('click', openGuide);
+  $('#lpInfo').style.cursor = 'pointer'; $('#lpName').parentElement.style.cursor = 'pointer';
 
   const setFavIcon = () => { const b = $('#lpFav'); b.classList.toggle('on', fav.has(current.id)); setIcon(b.firstElementChild, fav.has(current.id) ? 'starFill' : 'star'); };
   const zap = (d) => { if (playlist.length > 1) { idx = (idx + d + playlist.length) % playlist.length; tune(); } };
@@ -345,13 +435,13 @@ const Live = (() => {
   function wake(showInfo) {
     const root = $('#livePlayer');
     root.classList.remove('idle'); root.classList.toggle('show-info', !!showInfo);
-    clearTimeout(idle); idle = setTimeout(() => { if ($('#lpStatus').hidden) root.classList.add('idle'); }, 4000);
+    clearTimeout(idle); idle = setTimeout(() => { if ($('#lpStatus').hidden && guideEl.hidden) root.classList.add('idle'); }, 4000);
   }
   const fullscreen = () => (document.fullscreenElement ? document.exitFullscreen() : $('#livePlayer').requestFullscreen().catch(() => {}));
 
   function close() {
     if ($('#livePlayer').hidden) return;
-    clearTimeout(startTimer); video.pause(); video.removeAttribute('src'); video.load();
+    clearTimeout(startTimer); video.pause(); video.removeAttribute('src'); video.load(); guideEl.hidden = true;
     $('#livePlayer').hidden = true; document.body.style.overflow = '';
     if (document.fullscreenElement) document.exitFullscreen();
   }
@@ -366,8 +456,17 @@ const Live = (() => {
   setInterval(() => { if (!$('#livePlayer').hidden && current) info(); }, 30000); // progress bar and "now" roll over
   addEventListener('keydown', (e) => {
     if ($('#livePlayer').hidden) return;
+    if (guideOpen()) {
+      const k = e.key;
+      if (k === 'Escape' || k.toLowerCase() === 'g') { e.preventDefault(); e.stopPropagation(); closeGuide(); }
+      else if (k === 'ArrowDown') { e.preventDefault(); selectGuide(Math.min(playlist.length - 1, gSel + 1), true); }
+      else if (k === 'ArrowUp') { e.preventDefault(); selectGuide(Math.max(0, gSel - 1), true); }
+      else if (k === 'Enter') { e.preventDefault(); tuneTo(gSel); }
+      return;
+    }
     wake(true);
-    if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); zap(-1); }
+    if (e.key.toLowerCase() === 'g') openGuide();
+    else if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); zap(-1); }
     else if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); zap(1); }
     else if (e.key.toLowerCase() === 'f') fullscreen();
     else if (e.key.toLowerCase() === 'm') $('#lpMute').click();
