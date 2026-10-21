@@ -2,6 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { Readable } = require('stream');
 const { spawn, execFile } = require('child_process');
 const config = require('./lib/config');
@@ -22,6 +23,7 @@ const PUBLIC = path.join(__dirname, '..', 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 
 const streamsByRef = new Map(); // ref -> parsed stream (so the browser never handles URLs/keys)
+const offline = require('./lib/offline');
 const resolved = new Map();     // ref -> { url, at }
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -31,14 +33,18 @@ async function resolveFinal(ref) {
   if (hit && Date.now() - hit.at < 15 * 60 * 1000) return hit.url;
   const s = streamsByRef.get(ref);
   if (!s) throw new HttpError(404, 'Stream expired, reload the stream list.');
-  let url = s.url;
+  const url = await resolveDirect(s.url);
+  resolved.set(ref, { url, at: Date.now() });
+  return url;
+}
+
+async function resolveDirect(url) {
   try { // Torrentio's /resolve/ link 302s to the Real-Debrid direct link
     const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30000) });
     const loc = r.headers.get('location');
     if (r.status >= 300 && r.status < 400 && loc) url = new URL(loc, url).toString();
     r.body && r.body.cancel().catch(() => {});
   } catch { /* fall back to the original URL */ }
-  resolved.set(ref, { url, at: Date.now() });
   return url;
 }
 
@@ -116,11 +122,20 @@ async function backfillGenres(data) {
 function continueList(data) {
   const items = new Map();
   const live = Object.entries(data.progress)
-    .filter(([, p]) => p.meta && p.pos > 10 && !(p.dur && p.pos / p.dur > 0.9))
+    .filter(([, p]) => p.meta && /^tt\d+$/.test(p.meta.id) && p.pos > 10 && !(p.dur && p.pos / p.dur > 0.9))
     .sort((a, b) => b[1].at - a[1].at);
   for (const [key, p] of live) if (!items.has(p.meta.id)) items.set(p.meta.id, { key, pos: p.pos, dur: p.dur, at: p.at, ...p.meta });
   for (const m of data.pinned || []) if (!items.has(m.id)) items.set(m.id, { key: null, pos: 0, dur: 0, ...m });
   return [...items.values()].sort((a, b) => b.at - a.at).slice(0, 24);
+}
+
+/** Aired episodes after the furthest one watched; shows never started have no badge. */
+function newEpisodeCount(data, id, meta, now = Date.now()) {
+  const eps = ((meta && meta.videos) || []).filter((v) => v.season > 0 && v.released && Date.parse(v.released) <= now);
+  let last = null;
+  for (const v of eps) if (data.watched[`series:${v.id}`] && (!last || v.season > last.season || (v.season === last.season && v.episode > last.episode))) last = v;
+  if (!last) return 0;
+  return eps.filter((v) => (v.season > last.season || (v.season === last.season && v.episode > last.episode)) && !data.watched[`series:${v.id}`]).length;
 }
 
 function resumePoint(p) {
@@ -172,7 +187,7 @@ async function probe(ref) {
   const videoOk = !raw.video || (SAFE_VIDEO.has(raw.video) && (raw.video !== 'h264' || raw.eightBit));
   const audioOk = !track || SAFE_AUDIO.has(track.codec);
   const needsConvert = !videoOk || !audioOk || idx > 0;
-  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', mode: raw.ffmpeg && needsConvert ? 'compat' : 'direct', segments: segments.fromChapters(raw.chapters, raw.duration) };
+  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', mode: raw.ffmpeg && (needsConvert || (streamsByRef.get(ref) || {}).forceCompat) ? 'compat' : 'direct', segments: segments.fromChapters(raw.chapters, raw.duration) };
 }
 
 /** Index of the audio track in the user's language (first track if none is tagged). */
@@ -407,6 +422,56 @@ function createServer(port) {
       if (typeof key === 'string' && Number.isFinite(pos) && Number.isFinite(dur)) recordProgress(key, pos, dur, meta);
       return { ok: true };
     },
+    // Series in the library or Continue watching that have aired episodes after the last one the user watched.
+    async 'GET /api/new-episodes'() {
+      const data = config.loadData();
+      const ids = new Map();
+      for (const m of [...data.library, ...(data.pinned || [])]) if (m.type === 'series') ids.set(m.id, m);
+      for (const p of Object.values(data.progress)) if (p.meta && p.meta.type === 'series') ids.set(p.meta.id, p.meta);
+      const out = {};
+      await Promise.all([...ids.keys()].slice(0, 60).map(async (id) => {
+        try { const n = newEpisodeCount(data, id, await cinemeta.meta('series', id)); if (n) out[id] = n; } catch { /* offline: no badge */ }
+      }));
+      return out;
+    },
+    // ---- Downloads and DVR ----
+    async 'GET /api/offline'() { return offline.list(); },
+    async 'POST /api/offline/download'(req) {
+      const { ref, title, subtitle, meta } = await readBody(req);
+      const st = streamsByRef.get(ref);
+      if (!st) throw new HttpError(404, 'Stream expired, reload the stream list.');
+      if (typeof title !== 'string' || !title) throw new HttpError(400, 'bad title');
+      return offline.addDownload({ title, subtitle: String(subtitle || ''), resolution: st.resolution, size: st.size, filename: st.filename, meta, src: st.url });
+    },
+    async 'POST /api/offline/pause'(req) { offline.pauseDownload(String((await readBody(req)).id)); return { ok: true }; },
+    async 'POST /api/offline/resume'(req) { offline.resumeDownload(String((await readBody(req)).id)); return { ok: true }; },
+    async 'POST /api/offline/remove'(req) { offline.remove(String((await readBody(req)).id)); return { ok: true }; },
+    // Make a finished download/recording playable by the normal player; returns a stream the client can open.
+    async 'GET /api/offline/play'(req, q) {
+      const j = offline.find(q.get('id'));
+      if (!j || j.status !== 'done' || !j.file) throw new HttpError(404, 'That file isn\'t ready.');
+      const ref = crypto.createHash('sha1').update('offline:' + j.id).digest('hex').slice(0, 20);
+      const isRec = !!j.channelId;
+      const st = { ref, url: `http://${req.headers.host}/api/file/${j.id}`, name: j.title, filename: path.basename(j.file), resolution: isRec ? 'Recording' : j.resolution, size: j.bytes || j.total || 0, seeders: 0, provider: 'Offline', languageLine: '', cached: true, hdr: false, source: '', codec: '', forceCompat: isRec };
+      streamsByRef.set(ref, st);
+      resolved.delete(ref);
+      return { stream: publicStream(st), meta: j.meta || {}, title: j.title, subtitle: j.subtitle || '', recording: isRec, id: j.id };
+    },
+    async 'POST /api/dvr/record'(req) {
+      const b = await readBody(req), cfg = config.loadConfig();
+      if (!cfg.xtreamUrl) throw new HttpError(400, 'Live TV isn\'t set up.');
+      if (!/^\d+$/.test(String(b.channelId))) throw new HttpError(400, 'bad channel');
+      const now = Date.now();
+      const start = Number.isFinite(b.start) ? b.start : now;
+      const end = Number.isFinite(b.end) ? b.end : start + (Number(b.minutes) || 60) * 60000;
+      try {
+        const rec = offline.schedule({ channelId: b.channelId, name: String(b.name || 'Recording').slice(0, 120), start, end, padded: !!b.padded });
+        offline.tick({ liveUrlFor: (id) => xtream.clientFor(cfg).liveUrl(id) });   // starts right away when it's due now
+        return { ...rec, status: rec.start <= Date.now() + 1000 ? 'recording' : rec.status };
+      }
+      catch (e) { throw new HttpError(e.status || 400, e.message); }
+    },
+    async 'POST /api/dvr/stop'(req) { offline.stopRecording(String((await readBody(req)).id)); return { ok: true }; },
     async 'GET /api/library'() {
       const data = config.loadData();
       const cont = continueList(data);
@@ -462,7 +527,7 @@ function createServer(port) {
     },
   };
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
       // Guard against DNS rebinding and cross-site requests to this local API.
@@ -474,6 +539,7 @@ function createServer(port) {
       }
       let m;
       if ((m = /^\/api\/stream\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return proxyStream(req, res, m[1]);
+      if ((m = /^\/api\/file\/([0-9a-f]{16})$/.exec(url.pathname)) && req.method === 'GET') return offline.serveFile(req, res, m[1]);
       if ((m = /^\/api\/live\/stream\/(\d+)$/.exec(url.pathname)) && req.method === 'GET') {
         const cfg = config.loadConfig();
         if (!cfg.xtreamUrl || !player.available().ffmpeg) throw new HttpError(400, player.available().ffmpeg ? 'Live TV isn\'t set up.' : 'Live TV needs ffmpeg (sudo dnf/apt install ffmpeg).');
@@ -499,6 +565,17 @@ function createServer(port) {
       res.end(JSON.stringify({ error: e.message }));
     }
   });
+  // Scheduled recordings start on time; downloads run only while nothing is streaming, so they can never cause buffering.
+  const timer = setInterval(() => {
+    try {
+      const cfg = config.loadConfig();
+      offline.tick({ liveUrlFor: (id) => (cfg.xtreamUrl ? xtream.clientFor(cfg).liveUrl(id) : null) });
+      offline.pumpDownloads(resolveDirect, health.active() > 0);
+    } catch { /* try again next tick */ }
+  }, 4000);
+  timer.unref();
+  server.on('close', () => clearInterval(timer));
+  return server;
 }
 
 function serveStatic(pathname, res) {
@@ -537,4 +614,4 @@ async function proxyStream(req, res, ref) {
   body.on('data', (c) => health.countIn(e, c.length)).on('error', () => res.destroy()).pipe(res);
 }
 
-module.exports = { createServer };
+module.exports = { createServer, newEpisodeCount };

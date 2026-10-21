@@ -20,7 +20,7 @@ const Player = (() => {
 
   // ---------- opening / loading ----------
   async function open(c, resolution, startAt) {
-    ctx = c; nextPromise = null; activeSub = -1; $('#pNext').hidden = true; $('#pWarn').hidden = true; $('#pSkip').hidden = true; watch.reset(true);
+    cancelAutoplay(); ctx = c; nextPromise = null; activeSub = -1; $('#pNext').hidden = true; $('#pWarn').hidden = true; $('#pSkip').hidden = true; watch.reset(true);
     maxH = 1080; segs = {}; learned = { intro: null, creditsFromEnd: null }; creditsDetectedAt = null; darkRun = 0;
     if (ctx.type === 'series') api('/skips?id=' + ctx.meta.id).then((r) => { learned = { intro: r.intro, creditsFromEnd: r.creditsFromEnd }; }).catch(() => {});
     pick = ctx.picks.find((p) => p.resolution === resolution) || ctx.picks[0];
@@ -98,7 +98,22 @@ const Player = (() => {
     if (APPINFO.players.mpv || APPINFO.players.vlc) hints.push(h('button', { class: 'btn', onclick: openExternal }, 'Open in mpv / VLC'));
     status('err', 'This stream can’t be played in the app window.', h('div', {}, hints));
   });
-  video.addEventListener('ended', () => { markProgress(true); });
+  video.addEventListener('ended', () => { markProgress(true); autoplayCountdown(); });
+  // When an episode finishes and Autoplay next is on, count down on the Next button, then start it. Any other action cancels.
+  let autoTimer = null;
+  function cancelAutoplay() { clearInterval(autoTimer); autoTimer = null; $('#pNext').classList.remove('counting'); }
+  async function autoplayCountdown() {
+    if (!ctx || !ctx.next) return;
+    const cfg = await api('/config').catch(() => ({}));
+    if (!cfg.autoplayNext) return;
+    const btn = $('#pNext'); btn.querySelector('small').textContent = ctx.next.label; btn.hidden = false;
+    nextPromise = nextPromise || ctx.next.load().catch(() => null);
+    let n = 8; btn.dataset.count = n; btn.classList.add('counting');
+    autoTimer = setInterval(() => { btn.dataset.count = --n; if (n <= 0) { cancelAutoplay(); btn.click(); } }, 1000);
+  }
+  video.addEventListener('play', cancelAutoplay);
+  video.addEventListener('seeking', cancelAutoplay);
+  addEventListener('keydown', (e) => { if (autoTimer && e.key === 'Escape') { e.stopImmediatePropagation(); cancelAutoplay(); } }, true);
 
   // Chromium can't decode AC3/E-AC3/DTS and plays those files silently without raising an error.
   // If nothing has been decoded a few seconds into playback, switch to the converting stream.
@@ -334,6 +349,7 @@ const Player = (() => {
     }
   }, 1000);
   $('#pNext').onclick = async () => {
+    cancelAutoplay();
     const next = await (nextPromise || ctx.next.load());
     if (!next || !next.picks.length) return toast('No streams available for the next episode');
     markProgress(true);
@@ -387,7 +403,7 @@ const Player = (() => {
 
   function close() {
     if (root.hidden) return;
-    markProgress(); token++;
+    markProgress(); token++; cancelAutoplay();
     video.pause(); video.removeAttribute('src'); video.load();
     for (const t of subTracks) t.track.mode = 'disabled';
     root.hidden = true; $('#pWarn').hidden = true; document.body.style.overflow = '';

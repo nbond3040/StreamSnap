@@ -67,7 +67,7 @@ function card(m, prog, onRemove, onOpen) {
   const id = m.id || m.imdb_id;
   const play = h('button', { class: 'playbtn', title: 'Play', 'aria-label': `Play ${m.name}`, onclick: (e) => { e.preventDefault(); e.stopPropagation(); (onOpen || quickPlay)(m); } });
   setIcon(play, 'play');
-  const c = h('a', { class: 'card', href: `#/detail/${m.type}/${id}` },
+  const c = h('a', { class: 'card', href: `#/detail/${m.type}/${id}`, 'data-tt': m.type === 'series' ? id : null },
     h('div', { class: 'img', style: m.poster ? `background-image:url("${encodeURI(m.poster)}")` : '' },
       m.imdbRating && h('span', { class: 'rate' }, '★ ' + m.imdbRating), play),
     h('div', { class: 't' }, m.name, (m.releaseInfo || m.year || m.season) && h('small', {}, m.season ? `S${m.season} E${m.episode}` : m.releaseInfo || m.year)));
@@ -92,6 +92,15 @@ function card(m, prog, onRemove, onOpen) {
   }
   if (prog && prog.dur) c.append(h('div', { class: 'prog' }, h('i', { style: `width:${Math.min(100, (prog.pos / prog.dur) * 100)}%` })));
   return c;
+}
+/** Mark series cards that have aired episodes the user hasn't watched. Cheap and best-effort: the page never waits for it. */
+let newEps = null;
+async function applyBadges() {
+  try { if (!newEps || Date.now() - newEps.at > 5 * 60 * 1000) newEps = { at: Date.now(), map: await api('/new-episodes') }; } catch { return; }
+  for (const c of view.querySelectorAll('.card[data-tt]')) {
+    const n = newEps.map[c.dataset.tt];
+    if (n && !c.querySelector('.newbadge')) c.querySelector('.img').append(h('span', { class: 'newbadge', title: `${n} unwatched episode${n > 1 ? 's' : ''}` }, n > 9 ? '9+ new' : `${n} new`));
+  }
 }
 const scroller = (items, prog, onRemove, onOpen) => h('div', { class: 'scroller' }, items.map((m) => card(m, prog && prog(m), onRemove, onOpen)));
 const skeletons = (n = 8) => h('div', { class: 'scroller' }, Array.from({ length: n }, () => h('div', { class: 'skel' })));
@@ -134,6 +143,7 @@ async function home() {
   };
   out.push(...row('Popular movies', moviesR, movies, 'movie'), ...row('Popular series', seriesR, series, 'series'));
   view.replaceChildren(...out);
+  applyBadges();
 }
 
 // Discover remembers what has been loaded (per type and genre) and the genre you picked, so Back restores the same list.
@@ -243,6 +253,7 @@ async function libraryView() {
   }
   view.replaceChildren(h('h2', { class: 'sec' }, 'My library'), h('div', { class: 'filters' }, seg, sel), body);
   render();
+  applyBadges();
 }
 
 // ---------- detail ----------
@@ -278,6 +289,19 @@ function streamChips(s, showLangs) {
     h('span', { class: 'chip' }, `👤 ${s.seeders}`), s.languageMatch === 'multi' && h('span', { class: 'chip' }, 'multi-audio'));
 }
 
+/** Save a stream for offline viewing (it downloads in the background, and waits while anything is playing). */
+function dlButton(ctx, s) {
+  const b = h('button', { class: 'btn ghost sm', title: 'Download for offline viewing', 'aria-label': 'Download', onclick: async (e) => {
+    e.stopPropagation(); b.disabled = true;
+    try {
+      await api('/offline/download', { ref: s.ref, title: ctx.title, subtitle: ctx.subtitleLine || '', meta: ctx.meta });
+      toast('Downloading — see the Downloads page');
+    } catch (err) { toast(err.message); b.disabled = false; }
+  } });
+  setIcon(b, 'download');
+  return b;
+}
+
 function renderStreams(box, ctx, cfg) {
   const hid = ctx.hidden;
   const note = `${ctx.total} found · ${ctx.language} audio only` + (hid.language ? ` · ${hid.language} other-language hidden` : '') + (hid.uncached ? ` · ${hid.uncached} uncached hidden` : '') + (hid.audio ? ` · ${hid.audio} with no ${ctx.language} audio track hidden` : '');
@@ -292,10 +316,10 @@ function renderStreams(box, ctx, cfg) {
     h('div', { class: 'picks' }, ctx.picks.map((p) => h('div', { class: 'pick' },
       h('div', { class: 'q r' + p.resolution }, resLabel(p.resolution)),
       h('div', { class: 'fn' }, p.stream.filename), streamChips(p.stream, ctx.languageFallback),
-      h('div', {}, h('button', { class: 'btn sm', onclick: () => Player.open(ctx, p.resolution) }, '▶ Play')),
+      h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => Player.open(ctx, p.resolution) }, '▶ Play'), dlButton(ctx, p.stream)),
       p.alternatives.length > 0 && h('details', { class: 'alts' }, h('summary', {}, `${p.alternatives.length} other options`),
         p.alternatives.map((a) => h('div', { class: 'alt' }, h('span', {}, `${fmtSize(a.size)} · ${a.source || '?'} ${a.codec} · 👤${a.seeders}`),
-          h('button', { class: 'btn ghost sm', onclick: () => Player.open(withAlt(p.resolution, a), p.resolution) }, 'Play'))))))),
+          h('span', { class: 'row' }, h('button', { class: 'btn ghost sm', onclick: () => Player.open(withAlt(p.resolution, a), p.resolution) }, 'Play'), dlButton(ctx, a)))))))),
     h('p', { class: 'subtle', style: 'margin:12px 0 0' }, note)));
 }
 
@@ -514,6 +538,8 @@ async function settings() {
       check('verifyAudio', 'Verify audio language by inspecting the files', 'Uses ffmpeg to read each candidate’s audio tracks, so releases without your language are never picked. Slightly slower.'),
       check('allowUncached', 'Allow streams not cached on Real-Debrid', 'Slow: Real-Debrid has to download them first.'),
       field('HDR / Dolby Vision', select('hdrPolicy', { allow: 'Allow', avoid: 'Avoid when an SDR option exists', only: 'HDR only' })),
+      field('Downloads & recordings folder', text('downloadDir', 'text', '~/Videos/StreamSnap'), 'Absolute path. Leave blank for ~/Videos/StreamSnap.'),
+      check('autoplayNext', 'Autoplay next episode', 'When an episode ends, the next one starts after a short countdown. You can cancel it.'),
       check('subtitles', 'Fetch captions in my language', 'Captions are always off until you turn them on in the player.')),
     h('div', { class: 'card2' }, h('h2', {}, 'Playback'),
       field('Player', select('player', { browser: 'Built-in player (quality switching, captions, next episode)', auto: 'External: mpv → VLC', mpv: 'External: mpv', vlc: 'External: VLC' }),
@@ -527,6 +553,66 @@ async function settings() {
     try { await api('/config', body); toast('Settings saved'); } catch (err) { toast(err.message); }
   };
   view.replaceChildren(f);
+}
+
+// ---------- downloads & recordings ----------
+const fmtGB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : Math.round(b / 1e6) + ' MB');
+const clockT = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+
+async function playOffline(id) {
+  try {
+    const r = await api('/offline/play?id=' + id);
+    const meta = r.recording ? { type: 'rec', id: 'rec' + id } : r.meta;
+    const type = r.recording ? 'rec' : (meta.type || 'movie');
+    Player.open({
+      type, vid: meta.videoId || meta.id, title: r.title, subtitleLine: r.subtitle, key: r.recording ? `rec:${id}` : `${type}:${meta.videoId || meta.id}`, meta,
+      picks: [{ resolution: r.stream.resolution, stream: r.stream, alternatives: [] }], hidden: {}, subs: [], series: null, next: null,
+    }, r.stream.resolution);
+  } catch (e) { toast(e.message); }
+}
+
+async function offlineView() {
+  let data = await api('/offline');
+  const body = h('div');
+  let timer;
+  const act = (path, id) => async () => { try { await api(path, { id }); await refresh(); } catch (e) { toast(e.message); } };
+  const iconBtn = (icon, title, fn) => { const b = h('button', { class: 'btn ghost sm', title, 'aria-label': title, onclick: fn }); setIcon(b, icon); return b; };
+  const bar = (frac) => h('div', { class: 'dlbar' }, h('i', { style: `width:${Math.max(0, Math.min(100, frac * 100))}%` }));
+
+  function dlRow(j) {
+    const st = { queued: j.waiting ? 'Waiting for playback to finish' : 'Queued', downloading: `Downloading ${j.total ? Math.round((j.bytes / j.total) * 100) + '%' : ''} · ${j.kbps ? (j.kbps / 8000).toFixed(1) + ' MB/s' : '…'}`, paused: 'Paused', done: fmtGB(j.bytes || j.total), error: j.error || 'Failed' }[j.status] || j.status;
+    const btns = [];
+    if (j.status === 'done') btns.push(h('button', { class: 'btn sm', onclick: () => playOffline(j.id) }, '▶ Play'));
+    if (j.status === 'downloading' || j.status === 'queued') btns.push(iconBtn('pauseSm', 'Pause', act('/offline/pause', j.id)));
+    if (j.status === 'paused' || j.status === 'error') btns.push(h('button', { class: 'btn ghost sm', onclick: act('/offline/resume', j.id) }, j.status === 'error' ? 'Retry' : 'Resume'));
+    btns.push(iconBtn('trash', 'Delete', act('/offline/remove', j.id)));
+    return h('div', { class: 'dlrow ' + j.status },
+      h('div', { class: 'dlinfo' }, h('b', {}, j.title, j.subtitle && h('span', { class: 'subtle' }, '  ' + j.subtitle), h('span', { class: 'chip' }, j.resolution === '2160p' ? '4K' : j.resolution)),
+        h('div', { class: 'subtle' + (j.status === 'error' ? ' bad' : '') }, st), (j.status === 'downloading' || (j.status === 'paused' && j.bytes)) && j.total > 0 && bar(j.bytes / j.total)),
+      h('div', { class: 'dlbtns' }, btns));
+  }
+  function recRow(r) {
+    const st = { scheduled: `Scheduled · ${clockT(r.start)} – ${clockT(r.end).split(', ').pop()}`, recording: `Recording now · ${fmtGB(r.bytes)} · until ${clockT(r.end).split(', ').pop()}`, done: `${clockT(r.start)} · ${fmtGB(r.bytes)}`, error: r.error || 'Failed' }[r.status] || r.status;
+    const btns = [];
+    if (r.status === 'done') btns.push(h('button', { class: 'btn sm', onclick: () => playOffline(r.id) }, '▶ Play'));
+    if (r.status === 'recording') btns.push(h('button', { class: 'btn ghost sm', onclick: act('/dvr/stop', r.id) }, 'Stop'));
+    btns.push(iconBtn('trash', r.status === 'scheduled' ? 'Cancel' : 'Delete', act('/offline/remove', r.id)));
+    return h('div', { class: 'dlrow ' + r.status },
+      h('div', { class: 'dlinfo' }, h('b', {}, r.status === 'recording' && h('span', { class: 'recdot' }), r.title), h('div', { class: 'subtle' + (r.status === 'error' ? ' bad' : '') }, st)),
+      h('div', { class: 'dlbtns' }, btns));
+  }
+  function render() {
+    const free = data.freeBytes != null ? ` · ${fmtGB(data.freeBytes)} free` : '';
+    const out = [h('div', { class: 'subtle', style: 'margin:-6px 0 18px' }, `Saved in ${data.dir}${free}. Downloads pause while anything is playing, so they never cause buffering.`)];
+    out.push(h('h2', { class: 'sec' }, 'Recordings', h('span', { class: 'count' }, data.recordings.length)));
+    out.push(data.recordings.length ? h('div', { class: 'dllist' }, data.recordings.map(recRow)) : h('div', { class: 'empty' }, 'Nothing recorded. In Live TV, press the record button on a channel, or pick a programme in the guide.'));
+    out.push(h('h2', { class: 'sec' }, 'Downloads', h('span', { class: 'count' }, data.downloads.length)));
+    out.push(data.downloads.length ? h('div', { class: 'dllist' }, data.downloads.map(dlRow)) : h('div', { class: 'empty' }, 'Nothing downloaded. Use the download button next to a stream on a title’s page.'));
+    body.replaceChildren(...out);
+  }
+  async function refresh() { try { data = await api('/offline'); render(); } catch { /* keep the last view */ } }
+  view.replaceChildren(body); render();
+  timer = setInterval(() => { if (!location.hash.startsWith('#/downloads') || !body.isConnected) return clearInterval(timer); if (document.getElementById('player').hidden) refresh(); }, 2000);
 }
 
 // ---------- router ----------
@@ -552,10 +638,11 @@ async function route() {
     else if (page === 'live') await Live.view();
     else if (page === 'detail') await detail(a, b);
     else if (page === 'settings') await settings();
+    else if (page === 'downloads') await offlineView();
   } catch (e) { view.replaceChildren(showErr(e)); }
   window.scrollTo(0, restore);
 }
-window.onPlayerClosed = () => { if (/^#?\/?$|detail/.test(location.hash.replace('#', '')) || !location.hash) route(); };
+window.onPlayerClosed = () => { newEps = null; if (/^#?\/?$|detail/.test(location.hash.replace('#', '')) || !location.hash) route(); };
 addEventListener('hashchange', route);
 $('#search').onsubmit = (e) => {
   e.preventDefault();

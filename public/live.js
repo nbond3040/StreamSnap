@@ -439,11 +439,30 @@ const Live = (() => {
       h('div', { class: 'sc-title' }, h('b', {}, `${ch.num} · ${name}`), ch.id === (current || {}).id && h('span', { class: 'sc-badge' }, 'Watching')),
       ...(items.length ? items.map((p, i) => h('div', { class: 'sc-item' + (p.start <= now ? ' now' : '') },
         h('div', { class: 'sc-time' }, p.start <= now ? `Now · until ${clock(p.end)}` : `${clock(p.start)} – ${clock(p.end)}`),
-        h('div', { class: 'sc-name' }, p.title), i < 3 && p.desc && h('div', { class: 'sc-desc' }, p.desc)))
+        h('div', { class: 'sc-name' }, p.title, h('button', { class: 'sc-rec', title: 'Record this programme', 'aria-label': 'Record this programme', onclick: () => record(ch, { start: p.start, end: p.end, padded: true }, `${name} - ${p.title}`.slice(0, 120)) }, (() => { const sp = h('span'); setIcon(sp, 'record'); return sp; })())), i < 3 && p.desc && h('div', { class: 'sc-desc' }, p.desc)))
         : [h('div', { class: 'subtle', style: 'margin-top:1em' }, 'No programme information for this channel.')]),
       h('button', { class: 'btn', style: 'margin-top:1.2em', onclick: () => tuneTo(gSel) }, ch.id === (current || {}).id ? 'Keep watching' : 'Watch this channel'));
   }
   function tuneTo(i) { if (i === idx) { closeGuide(); return; } idx = i; closeGuide(); tune(); }
+
+  // ---------- DVR ----------
+  async function record(ch, body, label) {
+    try { await api('/dvr/record', { channelId: ch.id, name: label || disp(ch), ...body }); toast(body.start && body.start > Date.now() ? 'Scheduled — see Downloads' : 'Recording started — see Downloads'); }
+    catch (e) { toast(e.message); }
+  }
+  function buildRecMenu() {
+    const menu = $('#lpRecMenu');
+    if (!current) return;
+    const now = Date.now(), cur = nowOf((epg.get(current.id) || {}).list, now);
+    const item = (label, fn, small) => h('button', { onclick: () => { menu.hidden = true; fn(); } }, h('span', {}, label), small && h('small', {}, small));
+    menu.replaceChildren(h('div', { class: 'mh' }, 'Record this channel'),
+      cur && item(cur.title.slice(0, 40), () => record(current, { start: cur.start, end: cur.end, padded: true }, `${disp(current)} - ${cur.title}`.slice(0, 120)), `until ${clock(cur.end)}`),
+      item('Next 30 minutes', () => record(current, { minutes: 30 })), item('Next hour', () => record(current, { minutes: 60 })), item('Next 2 hours', () => record(current, { minutes: 120 })),
+      item('Recordings…', () => { location.hash = '#/downloads'; close(); }),
+      h('div', { class: 'subtle', style: 'padding:6px 12px;font-size:12px;max-width:260px' }, 'Recording uses its own connection to your provider; some plans allow only one at a time.'));
+  }
+  $('#lpRec').onclick = (e) => { e.stopPropagation(); const m = $('#lpRecMenu'); if (m.hidden) buildRecMenu(); m.hidden = !m.hidden; };
+  document.addEventListener('click', () => { $('#lpRecMenu').hidden = true; });
 
   // Refresh: drop the connection and start the channel again. A fresh start re-aligns picture and sound.
   function refresh() { if (!current) return; toast('Refreshing stream…'); tune(false, current); }

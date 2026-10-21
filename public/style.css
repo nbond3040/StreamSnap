@@ -445,3 +445,21 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 #player.idle #pSkip[data-kind="manual"] { opacity:0; pointer-events:none; }
 
 .lp-note, .p-note { margin-top:.7em; max-width:28em; font-size:.85em; line-height:1.45; color:#d9d9e8; }
+
+.card .newbadge { position:absolute; bottom:8px; left:8px; z-index:1; background:var(--accent, #7c5cff); color:#fff; border-radius:6px; padding:2px 8px; font-size:12px; font-weight:700; }
+#pNext.counting small::after { content:" · starting in " attr(data-count) "s (click to start now, Esc to cancel)"; }
+
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.dllist { display:grid; gap:10px; margin-bottom:28px; }
+.dlrow { display:flex; align-items:center; gap:16px; padding:14px 16px; background:var(--card, rgba(255,255,255,.05)); border-radius:12px; }
+.dlinfo { flex:1; min-width:0; } .dlinfo b { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.dlbtns { display:flex; gap:8px; align-items:center; }
+.dlbar { height:6px; border-radius:3px; background:rgba(128,128,128,.25); margin-top:8px; overflow:hidden; } .dlbar i { display:block; height:100%; background:var(--accent); }
+.recdot { width:10px; height:10px; border-radius:50%; background:#e5484d; animation:recpulse 1.2s infinite; }
+@keyframes recpulse { 50% { opacity:.3; } }
+.bad { color:#e5484d; }
+#lpRec.on { color:#e5484d; }
+
+#lpRecMenu { bottom:auto; top:48px; }
+.sc-rec { margin-left:.6em; background:none; border:0; color:#e5484d; cursor:pointer; vertical-align:middle; padding:0 .2em; }
+.sc-rec .ico { width:1em; height:1em; }
