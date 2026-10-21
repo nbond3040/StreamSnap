@@ -277,6 +277,7 @@ const Live = (() => {
   // ---------- the player ----------
   const video = $('#liveVideo');
   let idle, infoTimer, startTimer;
+  let liveMaxH = 1080;   // quality ceiling for converted channels; steps down by itself if this computer can't keep up
 
   function play(ch, list) {
     if (!(window.APPINFO || {}).players?.ffmpeg) return toast('Live TV needs ffmpeg installed (sudo dnf install ffmpeg, or apt install ffmpeg).');
@@ -308,7 +309,7 @@ const Live = (() => {
     $('#lpNow').textContent = '';
     setFavIcon();
     status('spin', `Tuning to ${disp(current)}…`);
-    video.src = `/api/live/stream/${current.id}?t=${Date.now()}`; // fresh connection every time, so a refresh really restarts it   // switching src drops the old request, which stops the old ffmpeg
+    video.src = `/api/live/stream/${current.id}?t=${Date.now()}` + (liveMaxH < 1080 ? `&q=${liveMaxH}` : ''); // fresh connection every time, so a refresh really restarts it   // switching src drops the old request, which stops the old ffmpeg
     video.play().catch(() => {});
     watchdog(35000);
     const mine = current;
@@ -481,8 +482,25 @@ const Live = (() => {
       h('button', { class: 'btn ghost sm', onclick: () => (warn.hidden = true) }, 'Dismiss'));
     warn.hidden = false;
   } });
-  video.addEventListener('playing', () => { clearTimeout(startTimer); status(null); });
-  video.addEventListener('waiting', () => { status('spin', 'Buffering…'); watchdog(25000); });
+  /** Say who is holding the stream up, and lower the quality ourselves if the cause is this computer. */
+  function bufferNote(text) {
+    const el = $('#lpStatus');
+    if (el.hidden || el.classList.contains('err2')) return;
+    let n = el.querySelector('.lp-note');
+    if (!n) { n = h('div', { class: 'lp-note' }); el.firstElementChild.append(n); }
+    n.textContent = text;
+  }
+  let localStrikes = 0;
+  const watchBuffering = () => BufferInfo.start(() => current && `live:${current.id}`, (r) => {
+    if (r.verdict === 'provider') bufferNote(r.text);
+    else if (r.verdict === 'local' && ++localStrikes >= 2 && liveMaxH > 480) {
+      liveMaxH = liveMaxH > 720 ? 720 : 480; localStrikes = 0;
+      toast(`Lowered the quality to ${liveMaxH}p because this computer couldn’t keep up.`);
+      tune(true, current);
+    } else if (r.verdict === 'local') bufferNote(r.text);
+  });
+  video.addEventListener('playing', () => { clearTimeout(startTimer); BufferInfo.stop(); localStrikes = 0; status(null); });
+  video.addEventListener('waiting', () => { status('spin', 'Buffering…'); watchdog(25000); watchBuffering(); });
   video.addEventListener('error', async () => {
     if (!video.getAttribute('src') || !current) return;
     const id = current.id;

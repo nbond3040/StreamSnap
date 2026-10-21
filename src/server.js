@@ -11,6 +11,7 @@ const subtitles = require('./lib/subtitles');
 const tmdb = require('./lib/tmdb');
 const xtream = require('./lib/xtream');
 const live = require('./lib/live');
+const health = require('./lib/health');
 const segments = require('./lib/segments');
 const player = require('./lib/player');
 const { selectStreams } = require('./lib/select');
@@ -126,7 +127,7 @@ async function ffprobeInfo(url) {
     const v = (j.streams || []).find((x) => x.codec_type === 'video' && !x.disposition?.attached_pic);
     const audioTracks = (j.streams || []).filter((x) => x.codec_type === 'audio').map((x) => ({ codec: x.codec_name, lang: x.tags?.language || '' }));
     const chapters = (j.chapters || []).map((c) => ({ start: parseFloat(c.start_time), end: parseFloat(c.end_time), title: c.tags?.title || '' }));
-    return { duration: parseFloat(j.format?.duration) || 0, video: v ? v.codec_name : '', audioTracks, eightBit: !v || !/10|12/.test(v.pix_fmt || ''), chapters };
+    return { duration: parseFloat(j.format?.duration) || 0, video: v ? v.codec_name : '', height: v ? Number(v.height) || 0 : 0, audioTracks, eightBit: !v || !/10|12/.test(v.pix_fmt || ''), chapters };
   } catch { return null; }
 }
 
@@ -182,23 +183,27 @@ async function rawProbe(ref) {
 }
 
 /** Remux (or transcode when needed) to fragmented MP4 so any stream plays in the app window. */
-async function compatStream(req, res, ref, t, delay = 0) {
+async function compatStream(req, res, ref, t, delay = 0, maxH = 1080) {
   const url = await resolveFinal(ref);
   const info = await probe(ref);
   const copyVideo = (info.video === 'h264' && info.eightBit !== false) || info.video === 'vp9' || info.video === 'av1';
   const copyAudio = info.audio === 'opus'; // Opus-in-MP4 decodes in every Chromium build, AAC needs proprietary codecs
-    delay = Math.max(-10, Math.min(10, delay));
+  delay = Math.max(-10, Math.min(10, delay));
   // Stream-copied video can only start on a keyframe; -noaccurate_seek keeps audio and video in step there.
   const seekFlags = copyVideo ? ['-noaccurate_seek'] : [];
   const inputs = delay
     ? [...seekFlags, '-ss', String(t), '-i', url, '-itsoffset', String(delay), ...seekFlags, '-ss', String(t), '-i', url]
     : [...seekFlags, '-ss', String(t), '-i', url];
   const aIn = delay ? 1 : 0;
-  const args = ['-v', 'error', '-fflags', '+genpts', ...inputs, '-map', '0:v:0', '-map', `${aIn}:a:${info.audioIndex || 0}?`, '-sn',
-    ...(copyVideo ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p']),
+  const big = info.height > 1080 || maxH <= 480;
+  const vf = info.height > maxH || !info.height ? ['-vf', `scale=-2:'min(${maxH},ih)'`] : [];
+  const args = ['-v', 'error', '-nostats', '-progress', 'pipe:2', '-fflags', '+genpts', ...inputs, '-map', '0:v:0', '-map', `${aIn}:a:${info.audioIndex || 0}?`, '-sn',
+    ...(copyVideo ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', big ? 'ultrafast' : 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p', ...vf]),
     ...(copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'libopus', '-b:a', '160k', '-ac', '2', '-strict', '-2', '-af', 'aresample=async=1:first_pts=0']),
     '-avoid_negative_ts', 'make_zero', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1'];
-  const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const entry = health.track(`vod:${ref}`, { kind: 'vod', mode: copyVideo ? 'copy' : 'transcode' });
+  health.watchFfmpeg(entry, ff);
   res.writeHead(200, { 'content-type': 'video/mp4', 'cache-control': 'no-store' });
   ff.stdout.pipe(res);
   const stop = () => ff.kill('SIGKILL');
@@ -294,6 +299,8 @@ function createServer(port) {
       config.saveData(data);
       return { hidden: data.liveHiddenCats };
     },
+    // Is a running stream limited by the provider or by this computer? (see lib/health.js)
+    async 'GET /api/health'(req, q) { return health.snapshot(q.get('key') || ''); },
     async 'GET /api/live/why'(req, q) { return { reason: live.why(q.get('id')) }; },
     async 'POST /api/live/favorite'(req) {
       const id = Number((await readBody(req)).id);
@@ -447,9 +454,9 @@ function createServer(port) {
       if ((m = /^\/api\/live\/stream\/(\d+)$/.exec(url.pathname)) && req.method === 'GET') {
         const cfg = config.loadConfig();
         if (!cfg.xtreamUrl || !player.available().ffmpeg) throw new HttpError(400, player.available().ffmpeg ? 'Live TV isn\'t set up.' : 'Live TV needs ffmpeg (sudo dnf/apt install ffmpeg).');
-        return live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1], parseInt(url.searchParams.get('a'), 10) || 0);
+        return live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1], parseInt(url.searchParams.get('a'), 10) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
       }
-      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0);
+      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
       if ((m = /^\/api\/sub\/([0-9a-f]{20})\.vtt$/.exec(url.pathname)) && req.method === 'GET') {
         const vtt = await subtitles.fetchVtt(m[1]);
         res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8' });
@@ -492,7 +499,19 @@ async function proxyStream(req, res, ref) {
   }
   res.writeHead(up.status, out);
   if (!up.body) return res.end();
-  Readable.fromWeb(up.body).on('error', () => res.destroy()).pipe(res);
+  // measure what the provider is delivering, compared with what this file needs to play without pauses
+  const key = `vod:${ref}`;
+  let e = health.entry(key);
+  if (!e) {
+    const total = Number((/\/(\d+)$/.exec(out['content-range'] || '') || [])[1]) || Number(out['content-length']) || 0;
+    const raw = probes.has(ref) ? await probes.get(ref).catch(() => null) : null;
+    e = health.track(key, { kind: 'vod', mode: 'direct', needKbps: raw && raw.duration && total ? (total * 8) / raw.duration / 1000 : 0 });
+    e.refs = 0;
+  }
+  e.refs++;
+  res.on('close', () => { if (--e.refs <= 0) health.untrack(e); });
+  const body = Readable.fromWeb(up.body);
+  body.on('data', (c) => health.countIn(e, c.length)).on('error', () => res.destroy()).pipe(res);
 }
 
 module.exports = { createServer };

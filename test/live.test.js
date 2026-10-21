@@ -44,7 +44,7 @@ test('Live TV end to end against a mock Xtream server', { skip: !haveFfmpeg && '
   assert.equal((await (await fetch(base + '/api/config')).json()).hasXtreamPass, true);
 
   const b = await (await fetch(base + '/api/live/browse')).json();
-  assert.equal(b.channels.length, 16); assert.deepEqual(b.categories.map((c) => c.name), ['US| NEWS NETWORK', 'US| SPORTS NETWORK', 'UK| MOVIES', 'WORLD LIVE SPORTS']);
+  assert.equal(b.channels.length, 17); assert.deepEqual(b.categories.map((c) => c.name), ['US| NEWS NETWORK', 'US| SPORTS NETWORK', 'UK| MOVIES', 'WORLD LIVE SPORTS']);
   assert.deepEqual((await (await post('/api/live/hide', { ids: ['4', 'x'], hide: true })).json()).hidden, ['4']);
   assert.deepEqual((await (await fetch(base + '/api/live/browse')).json()).hidden, ['4']);
   assert.deepEqual((await (await post('/api/live/hide', { ids: ['4'], hide: false })).json()).hidden, []);
@@ -61,6 +61,18 @@ test('Live TV end to end against a mock Xtream server', { skip: !haveFfmpeg && '
   const quiet = await fetch(base + '/api/live/stream/115');         // connects but never sends data
   assert.equal(quiet.status, 504); assert.match((await quiet.json()).error, /isn't broadcasting/);
   assert.match((await (await fetch(base + '/api/live/why?id=115')).json()).reason, /isn't broadcasting/);
+
+  // a provider that sends too slowly is reported as the provider's problem, never ours
+  const slow = await fetch(base + '/api/live/stream/117');
+  const reader = slow.body.getReader(); let got = 0; const until = Date.now() + 9500;
+  while (Date.now() < until) { const r = await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r({ timeout: true }), 1500))]); if (r.done) break; if (r.value) got += r.value.length; }
+  const h = await (await fetch(base + '/api/health?key=live:117')).json();
+  await reader.cancel().catch(() => {});
+  assert.equal(h.active, true);
+  assert.equal(h.verdict, 'provider', JSON.stringify(h));
+  assert.match(h.text, /provider/);
+  assert.ok(h.speed < 0.97, `speed ${h.speed}`);
+  assert.equal((await (await fetch(base + '/api/health?key=live:nope')).json()).active, false);
 
   // the stream: MPEG-2/MP2 in, browser-playable fragmented MP4 (H.264 + Opus) out
   const res = await fetch(base + '/api/live/stream/101');

@@ -44,3 +44,23 @@ function PlaybackWatch(video, opts) {
   reset(true);
   return { reset, check, stop: () => clearInterval(timer), get strikes() { return strikes; } };
 }
+
+/* While a player is buffering, ask the server who is holding the stream up (the provider, or this computer's re-encoding)
+   and report it. start() polls every 3 s until stop(); onResult gets { verdict, text, ... }. */
+const BufferInfo = (() => {
+  let timer = null, delay = null;
+  const stop = () => { clearTimeout(delay); clearInterval(timer); delay = timer = null; };
+  function start(getKey, onResult) {
+    if (timer || delay) return;                       // already watching this stall
+    delay = setTimeout(() => {                        // brief hiccups aren't worth a message
+      delay = null;
+      const poll = async () => {
+        const key = getKey();
+        if (!key) return;
+        try { onResult(await (await fetch('/api/health?key=' + encodeURIComponent(key))).json()); } catch { /* ignore */ }
+      };
+      poll(); timer = setInterval(poll, 3000);
+    }, 3000);
+  }
+  return { start, stop };
+})();

@@ -443,3 +443,5 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 #pSkip { position:absolute; right:28px; bottom:130px; z-index:4; background:rgba(20,20,30,.92); color:#fff; border:1px solid rgba(255,255,255,.3); border-radius:12px; padding:12px 22px; font-weight:700; box-shadow:0 8px 30px #000a; animation:pop .25s; backdrop-filter:blur(8px); }
 #pSkip:hover { background:var(--accent); border-color:transparent; }
 #player.idle #pSkip[data-kind="manual"] { opacity:0; pointer-events:none; }
+
+.lp-note, .p-note { margin-top:.7em; max-width:28em; font-size:.85em; line-height:1.45; color:#d9d9e8; }

@@ -5,6 +5,7 @@ const Player = (() => {
   const $ = (s) => document.querySelector(s);
   const root = $('#player'), video = $('#video'), seek = $('#pSeek');
   let ctx, pick, stream, mode, offset = 0, duration = 0, info = {}, fellBack = false;
+  let maxH = 1080;   // ceiling for converted (re-encoded) playback; steps down if this computer can't keep up
   let segs = {}, learned = { intro: null, creditsFromEnd: null }, creditsDetectedAt = null, darkRun = 0;
   let audioDelay = Number(localStorage.getItem('ss.audioDelay') || 0), lastSave = 0, nextPromise = null, subTracks = [], activeSub = -1, idleTimer, token = 0;
 
@@ -20,7 +21,7 @@ const Player = (() => {
   // ---------- opening / loading ----------
   async function open(c, resolution, startAt) {
     ctx = c; nextPromise = null; activeSub = -1; $('#pNext').hidden = true; $('#pWarn').hidden = true; $('#pSkip').hidden = true; watch.reset(true);
-    segs = {}; learned = { intro: null, creditsFromEnd: null }; creditsDetectedAt = null; darkRun = 0;
+    maxH = 1080; segs = {}; learned = { intro: null, creditsFromEnd: null }; creditsDetectedAt = null; darkRun = 0;
     if (ctx.type === 'series') api('/skips?id=' + ctx.meta.id).then((r) => { learned = { intro: r.intro, creditsFromEnd: r.creditsFromEnd }; }).catch(() => {});
     pick = ctx.picks.find((p) => p.resolution === resolution) || ctx.picks[0];
     $('#pTitle').textContent = ctx.title;
@@ -52,7 +53,7 @@ const Player = (() => {
 
   function setSource(at) {
     at = Math.max(0, at || 0);
-    if (mode === 'compat') { offset = at; video.src = `/api/compat/${stream.ref}?t=${at}&a=${audioDelay / 1000}`; }
+    if (mode === 'compat') { offset = at; video.src = `/api/compat/${stream.ref}?t=${at}&a=${audioDelay / 1000}` + (maxH < 1080 ? `&q=${maxH}` : ''); }
     else {
       offset = 0; video.src = `/api/stream/${stream.ref}`;
       video.addEventListener('loadedmetadata', () => { if (at) video.currentTime = at; }, { once: true });
@@ -68,8 +69,25 @@ const Player = (() => {
     el.replaceChildren(h('div', {}, kind === 'spin' && h('div', { class: 'spinner' }), h('div', {}, msg), extra || null));
   }
 
-  video.addEventListener('playing', () => status(null));
-  video.addEventListener('waiting', () => status('spin', 'Buffering…'));
+  /** While buffering: say whether the provider or this computer is the bottleneck (and ease the quality down if it's us). */
+  let localStrikes = 0;
+  function bufferNote(text) {
+    const el = $('#pStatus');
+    if (el.hidden || el.classList.contains('err2')) return;
+    let n = el.querySelector('.p-note');
+    if (!n) { n = h('div', { class: 'p-note' }); el.firstElementChild.append(n); }
+    n.textContent = text;
+  }
+  const watchBuffering = () => BufferInfo.start(() => stream && `vod:${stream.ref}`, (r) => {
+    if (r.verdict === 'provider') bufferNote(r.text);
+    else if (r.verdict === 'local' && mode === 'compat' && ++localStrikes >= 2 && maxH > 480) {
+      maxH = maxH > 720 ? 720 : 480; localStrikes = 0;
+      toast(`Lowered the converted quality to ${maxH}p because this computer couldn’t keep up.`);
+      setSource(cur()); video.play().catch(() => {});
+    } else if (r.verdict === 'local') bufferNote(r.text);
+  });
+  video.addEventListener('playing', () => { BufferInfo.stop(); localStrikes = 0; status(null); });
+  video.addEventListener('waiting', () => { status('spin', 'Buffering…'); watchBuffering(); });
   video.addEventListener('canplay', () => status(null));
   video.addEventListener('error', () => {
     if (!stream || !video.getAttribute('src')) return;
