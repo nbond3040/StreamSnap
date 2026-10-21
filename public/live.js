@@ -234,7 +234,7 @@ const Live = (() => {
 
   async function toggleFav(id) {
     try { fav = new Set((await api('/live/favorite', { id })).favorites); } catch (e) { return toast(e.message); }
-    if (state.sel.type === 'fav' && !state.q.trim()) draw();
+    if (state.sel.type === 'fav' && !state.q.trim() && !window.__popout) draw();
     else document.querySelectorAll(`.ch[data-id="${id}"] .star`).forEach((b) => { b.classList.toggle('on', fav.has(id)); setIcon(b, fav.has(id) ? 'starFill' : 'star'); });
     if (cfg.liveLayout === 'grouped') { const f = [...document.querySelectorAll('.live-rail .cat')].find((b) => /Favorites/.test(b.textContent)); if (f) f.querySelector('small').textContent = n(fav.size); }
   }
@@ -504,9 +504,28 @@ const Live = (() => {
     clearTimeout(startTimer); video.pause(); video.removeAttribute('src'); video.load(); guideEl.hidden = true; warn.hidden = true;
     $('#livePlayer').hidden = true; document.body.style.overflow = '';
     if (document.fullscreenElement) document.exitFullscreen();
+    if (window.__popout) window.close();
   }
 
   $('#lpBack').onclick = close;
+  /** Move this channel into its own window (frees this connection, since the new window opens its own). */
+  function popOut() {
+    if (!current) return;
+    if (openPopout(`live/${current.id}?${new URLSearchParams({ sel: JSON.stringify(gFilter) })}`)) close();
+  }
+  $('#lpPop').onclick = popOut;
+  /** Entry point for a pop-out window: load the channel list and start the channel with the same list for ↑/↓ and the guide. */
+  async function popout(id, sel) {
+    [data, cfg] = await Promise.all([api('/live/browse'), api('/config')]);
+    if (!data.configured) throw new Error('Live TV isn’t set up.');
+    document.documentElement.dataset.livesize = cfg.liveTextSize || 'large';
+    fav = new Set(data.favorites); prepare();
+    const ch = data.channels.find((c) => c.id === id);
+    if (!ch) throw new Error('That channel isn’t available any more.');
+    state.sel = sel; state.q = '';
+    const list = pool(sel, '').filter((c) => !isSep(c.name));
+    play(ch, list.some((c) => c.id === id) ? list : [ch, ...list]);
+  }
   $('#lpPrev').onclick = () => zap(-1);
   $('#lpNext').onclick = () => zap(1);
   $('#lpFull').onclick = fullscreen;
@@ -539,5 +558,5 @@ const Live = (() => {
   });
   addEventListener('hashchange', close);
 
-  return { view, toggleFav };
+  return { view, toggleFav, popout };
 })();

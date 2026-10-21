@@ -25,6 +25,7 @@ Open Settings and enter your Real-Debrid API key (https://real-debrid.com/apitok
 - Seven colors, each in dark, light or system mode (Settings → Appearance), cover-art "+" to add to your library, and every available stream is shown (labelled with its audio language) when nothing exists in your language
 - Live TV (Settings → Live TV): connect an Xtream Codes IPTV service, browse channels by category, search, favorite, see what's on now, and channel-surf with ↑/↓. Needs ffmpeg; your login stays on the server side and never reaches the page
 - Skip intro / recap buttons from chapter markers in the file, intros learned from your own skips, and credits noticed from the picture so "Next episode" appears when the credits start
+- Pop-out windows: send a live channel or a movie/episode to its own window (on another monitor when there is one) from the player
 - Optional external playback in mpv or VLC
 - Audio verification: with ffmpeg installed, candidates whose audio tracks are all in another language are dropped
 - Movie pages list the rest of their franchise (sequels, prequels, spin-offs) when you add a free TMDB API key in Settings
