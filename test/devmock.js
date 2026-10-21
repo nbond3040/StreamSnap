@@ -23,6 +23,9 @@ const stream = (res, label, file, extra = '') => ({
   behaviorHints: { filename: `Mock.${label}.${res}.WEB-DL.x264.mkv` },
 });
 
+const LAT = Number(process.env.MOCK_LATENCY_MS || 0);
+const realCreate = http.createServer;
+http.createServer = (handler) => realCreate((req, res) => (LAT && /\/stream\/|\/resolve\/|\/video\//.test(req.url) ? setTimeout(() => handler(req, res), LAT) : handler(req, res)));
 http.createServer((req, res) => {
   const json = (o) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
   const u = new URL(req.url, self);

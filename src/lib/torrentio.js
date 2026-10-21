@@ -64,15 +64,37 @@ function parseStream(s) {
   };
 }
 
+// The list for a title changes slowly, and the details page, the play button and a quick Back all ask for it:
+// share one request between simultaneous callers and reuse the answer for two minutes. A stale answer beats an error.
+const cache = new Map();         // key -> { at, streams }
+const inflight = new Map();      // key -> Promise
+const FRESH = 2 * 60 * 1000, STALE = 30 * 60 * 1000;
+
 async function fetchStreams(cfg, type, id, signal) {
   const base = buildBase(cfg);
-  const res = await fetch(`${base}/stream/${type}/${encodeURIComponent(id).replace(/%3A/g, ':')}.json`, {
-    headers: { 'user-agent': 'StreamSnap/0.1' },
-    signal: signal || AbortSignal.timeout(25000),
-  });
-  if (!res.ok) throw new Error(`Torrentio returned HTTP ${res.status}`);
-  const body = await res.json();
-  return (body.streams || []).map(parseStream).filter(Boolean);
+  const key = `${base}|${type}|${id}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < FRESH) return hit.streams;
+  if (inflight.has(key)) return inflight.get(key);
+  const job = (async () => {
+    try {
+      const res = await fetch(`${base}/stream/${type}/${encodeURIComponent(id).replace(/%3A/g, ':')}.json`, {
+        headers: { 'user-agent': 'StreamSnap/0.1' },
+        signal: signal || AbortSignal.timeout(25000),
+      });
+      if (!res.ok) throw new Error(`Torrentio returned HTTP ${res.status}`);
+      const body = await res.json();
+      const streams = (body.streams || []).map(parseStream).filter(Boolean);
+      cache.set(key, { at: Date.now(), streams });
+      while (cache.size > 200) cache.delete(cache.keys().next().value);
+      return streams;
+    } catch (e) {
+      if (hit && Date.now() - hit.at < STALE) return hit.streams;
+      throw e;
+    } finally { inflight.delete(key); }
+  })();
+  inflight.set(key, job);
+  return job;
 }
 
-module.exports = { buildBase, parseStream, fetchStreams };
+module.exports = { buildBase, parseStream, fetchStreams, _cache: cache };

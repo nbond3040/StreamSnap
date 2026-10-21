@@ -13,6 +13,7 @@ const xtream = require('./lib/xtream');
 const live = require('./lib/live');
 const health = require('./lib/health');
 const segments = require('./lib/segments');
+const probecache = require('./lib/probecache');
 const player = require('./lib/player');
 const { selectStreams } = require('./lib/select');
 const { LANGS, tagMatches, isUnknownTag, detectLanguages } = require('./lib/language');
@@ -61,24 +62,38 @@ async function readBody(req) {
  * Torrentio's language flags are only hints. Open each candidate with ffprobe and drop the ones whose
  * audio tracks are all in another language, then re-pick the best remaining stream per resolution.
  */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function verifyAudio(picks, cfg, hidden) {
   const avail = player.available();
   if (!cfg.verifyAudio || !(avail.ffprobe || avail.ffmpeg)) return picks;
-  const queue = picks.flatMap((p) => [p.stream, ...p.alternatives]);
-  let next = 0;
-  const bad = new Set();
-  await Promise.all(Array.from({ length: Math.min(6, queue.length) }, async () => {
-    while (next < queue.length) {
-      const s = queue[next++];
-      try {
-        const raw = await probe(s.ref);
-        if (raw.probed) {
-          s.audioLangs = [...new Set(raw.audioTracks.map((t) => t.lang).filter((l) => !isUnknownTag(l)))];
-          if (lacksNativeAudio(raw, cfg.nativeLanguage)) bad.add(s.ref);
-        }
-      } catch { /* unverifiable: keep it */ }
-    }
-  }));
+  // While something is playing, never compete with it for bandwidth: only use what we already know.
+  const busy = health.active() > 0;
+  const perRes = busy ? 1 : 3, workers = busy ? 2 : 8;
+  const bad = new Set(), done = new Set();
+  const check = async (s) => {
+    if (done.has(s.ref)) return;
+    try {
+      if (busy && !probecache.get(s)) return;
+      const raw = await probe(s.ref);
+      if (raw.probed) {
+        s.audioLangs = [...new Set(raw.audioTracks.map((t) => t.lang).filter((l) => !isUnknownTag(l)))];
+        done.add(s.ref);
+        if (lacksNativeAudio(raw, cfg.nativeLanguage)) bad.add(s.ref);
+      }
+    } catch { /* unverifiable: keep it */ }
+  };
+  const pool = async (items) => {
+    let i = 0;
+    await Promise.all(Array.from({ length: Math.min(workers, items.length) }, async () => { while (i < items.length) await check(items[i++]); }));
+  };
+  // The best few per resolution decide what gets picked, so those are the ones worth checking. Checking never delays the
+  // page for long: whatever isn't finished within the budget keeps going in the background and is remembered for next time.
+  await Promise.race([(async () => {
+    await pool(picks.flatMap((p) => [p.stream, ...p.alternatives].slice(0, perRes)));
+    const next = picks.flatMap((p) => { const left = [p.stream, ...p.alternatives].filter((s) => !bad.has(s.ref)); return left.length && !done.has(left[0].ref) ? left.slice(0, 3) : []; });
+    await pool(next);   // every checked candidate was in the wrong language: look a little further down the list
+  })(), sleep(4500)]);
   hidden.audio = bad.size;
   return picks.map((p) => {
     const list = [p.stream, ...p.alternatives].filter((s) => !bad.has(s.ref));
@@ -120,7 +135,7 @@ function run(cmd, args) {
 }
 
 async function ffprobeInfo(url) {
-  const { err, stdout } = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', '-show_chapters', url]);
+  const { err, stdout } = await run('ffprobe', ['-v', 'error', '-rw_timeout', '10000000', '-analyzeduration', '2000000', '-probesize', '2000000', '-print_format', 'json', '-show_format', '-show_streams', '-show_chapters', url]);
   if (err) return null;
   try {
     const j = JSON.parse(stdout);
@@ -175,9 +190,11 @@ async function rawProbe(ref) {
   const info = { duration: 0, video: '', eightBit: true, audioTracks: [], ffmpeg: player.available().ffmpeg, probed: false };
   const avail = player.available();
   if (avail.ffprobe || avail.ffmpeg) {
+    const stream = streamsByRef.get(ref), remembered = probecache.get(stream);
+    if (remembered) return { ...info, ...remembered, ffmpeg: info.ffmpeg };          // seen this exact release before: no network at all
     const url = await resolveFinal(ref);
     const found = avail.ffprobe ? await ffprobeInfo(url) : await ffmpegInfo(url);
-    if (found) Object.assign(info, found, { probed: true });
+    if (found) { Object.assign(info, found, { probed: true }); probecache.set(stream, { ...found, probed: true }); }
   }
   return info;
 }
@@ -316,11 +333,15 @@ function createServer(port) {
       const cfg = config.loadConfig();
       const type = q.get('type'), id = q.get('id');
       if (!/^(movie|series)$/.test(type) || !/^tt\d+(:\d+:\d+)?$/.test(id || '')) throw new HttpError(400, 'bad type or id');
+      const t0 = Date.now();
       let all;
       try { all = await torrentio.fetchStreams(cfg, type, id); } catch (e) { throw new HttpError(502, e.message); }
+      const tFetch = Date.now() - t0;
       for (const s of all) streamsByRef.set(s.ref, s);
       let { picks, hidden } = selectStreams(all, cfg);
+      const t1 = Date.now();
       let verified = await verifyAudio(picks, cfg, hidden);
+      const tVerify = Date.now() - t1;
       // Nothing in the user's language: better to offer every available stream (labelled) than an empty page.
       let languageFallback = false;
       if (!verified.length && all.length) {
@@ -328,6 +349,7 @@ function createServer(port) {
         if (any.picks.length) { verified = any.picks; hidden = { ...any.hidden, language: 0 }; languageFallback = true; }
       }
       return {
+        timings: { fetchMs: tFetch, verifyMs: tVerify, totalMs: Date.now() - t0 },
         languageFallback,
         total: all.length, hidden, language: LANGS[cfg.nativeLanguage]?.name || cfg.nativeLanguage,
         picks: verified.map((p) => ({ resolution: p.resolution, stream: publicStream(p.stream), alternatives: p.alternatives.map(publicStream) })),
