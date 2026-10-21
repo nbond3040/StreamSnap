@@ -1,6 +1,6 @@
 {
   "name": "streamsnap",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Stremio-style desktop streaming app for Linux: Torrentio + Real-Debrid with automatic per-resolution stream selection in your native language.",
   "license": "MIT",
   "type": "commonjs",

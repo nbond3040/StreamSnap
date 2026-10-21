@@ -16,7 +16,22 @@ node bin/streamsnap.js          # needs Node 20+
 
 Open Settings and enter your Real-Debrid API key (https://real-debrid.com/apitoken). Torrentio has no separate API key: its settings live in its URL, so the key goes into the Torrentio request. If you already have a customised Torrentio install URL, paste it into "Torrentio config URL".
 
+## Install a package
+
+Each package bundles Electron, so it needs no Node.js. Build them yourself (or take them from the *Build packages* workflow artifacts):
+
+```sh
+sh packaging/rpm/build.sh                                    # Fedora/RHEL: dist/rpm/RPMS/x86_64/streamsnap-*.rpm  (sudo dnf install ./streamsnap-*.rpm)
+APPIMAGETOOL=/path/to/appimagetool sh packaging/appimage/build.sh   # dist/StreamSnap-*-x86_64.AppImage
+flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.github.nbond3040.StreamSnap.yml
+```
+
+The Flatpak builds its own ffmpeg; for the RPM and AppImage install `ffmpeg` (Fedora: RPM Fusion's `ffmpeg`) for format conversion, Live TV and DVR.
+
 ## Features
+- Downloads for offline viewing (button next to each stream) and a Downloads page; downloads pause while anything is playing so they can never cause buffering
+- DVR: record a live channel now (30 min / 1 h / 2 h / this programme) or schedule a programme from the channel guide; recordings play from the Downloads page
+- "N new" badges on series with aired episodes you haven't watched, and an Autoplay-next-episode setting with a cancellable countdown
 - Catalogs, search, genres and series/episode browsing (Cinemeta, the same metadata source as Stremio)
 - Per-resolution auto-selection (4K / 1080p / 720p / 480p), with alternatives per resolution
 - Native-language filter: Torrentio language flags, release-name fallback, optional multi/dual-audio, English untagged handling

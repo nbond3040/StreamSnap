@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.nbond3040.StreamSnap</id>
+  <name>StreamSnap</name>
+  <summary>Stream movies, series and live TV with Real-Debrid</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>StreamSnap is a desktop streaming app. It finds the best stream for every resolution in your language through Torrentio and Real-Debrid, plays Live TV from an Xtream Codes provider with a channel guide, and can download titles and record live channels for later.</p>
+    <ul>
+      <li>Automatic per-resolution stream selection in your native language</li>
+      <li>Built-in player with quality switching, captions, skip intro and credits, autoplay next episode</li>
+      <li>Live TV with a channel guide and DVR recordings</li>
+      <li>Offline downloads</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.nbond3040.StreamSnap.desktop</launchable>
+  <provides><binary>streamsnap</binary></provides>
+  <content_rating type="oars-1.1" />
+  <releases><release version="0.2.0" date="2026-10-21" /></releases>
+</component>

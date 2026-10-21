@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=StreamSnap
+GenericName=Video Streaming
+Comment=Stream movies, series and live TV with Real-Debrid
+Exec=streamsnap
+Icon=streamsnap
+StartupWMClass=streamsnap
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=stream;movies;tv;series;iptv;torrentio;

@@ -1,0 +1,83 @@
+# Build:  flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.github.nbond3040.StreamSnap.yml
+# (run from the repository root; needs the org.freedesktop.Sdk and org.electronjs.Electron2.BaseApp 24.08 runtimes from Flathub)
+app-id: io.github.nbond3040.StreamSnap
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+base: org.electronjs.Electron2.BaseApp
+base-version: '24.08'
+command: streamsnap
+separate-locales: false
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=xdg-videos      # downloads and recordings (default folder ~/Videos/StreamSnap)
+  - --env=STREAMSNAP_NO_DESKTOP=1
+
+modules:
+  # ffmpeg is what converts formats for the in-app player and records/plays Live TV
+  - name: opus
+    buildsystem: autotools
+    config-opts: [--disable-doc, --disable-extra-programs]
+    sources:
+      - type: git
+        url: https://github.com/xiph/opus.git
+        tag: v1.5.2
+    cleanup: [/include, /lib/pkgconfig, /share/man]
+
+  - name: x264
+    buildsystem: autotools
+    config-opts: [--enable-shared, --disable-cli]
+    sources:
+      - type: git
+        url: https://code.videolan.org/videolan/x264.git
+        branch: stable
+    cleanup: [/include, /lib/pkgconfig]
+
+  - name: ffmpeg
+    buildsystem: autotools
+    config-opts:
+      - --enable-gpl
+      - --enable-shared
+      - --disable-static
+      - --disable-doc
+      - --disable-debug
+      - --disable-ffplay
+      - --enable-libx264
+      - --enable-libopus
+    sources:
+      - type: git
+        url: https://git.ffmpeg.org/ffmpeg.git
+        tag: n7.1.1
+    cleanup: [/include, /lib/pkgconfig, /share/ffmpeg/examples, /share/man]
+
+  - name: streamsnap
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/streamsnap/app /app/lib/streamsnap/electron
+      - cp -a bin desktop public src package.json /app/lib/streamsnap/app/
+      - cp -a electron/. /app/lib/streamsnap/electron/
+      - install -Dm755 streamsnap-launcher.sh /app/bin/streamsnap
+      - install -Dm644 packaging/streamsnap.desktop /app/share/applications/io.github.nbond3040.StreamSnap.desktop
+      - install -Dm644 packaging/streamsnap.metainfo.xml /app/share/metainfo/io.github.nbond3040.StreamSnap.metainfo.xml
+      - for n in 16 32 48 64 128 256 512; do install -Dm644 public/icons/$n.png /app/share/icons/hicolor/${n}x${n}/apps/io.github.nbond3040.StreamSnap.png; done
+      - install -Dm644 public/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.nbond3040.StreamSnap.svg
+      - sed -i 's/^Icon=.*/Icon=io.github.nbond3040.StreamSnap/' /app/share/applications/io.github.nbond3040.StreamSnap.desktop
+    sources:
+      - type: dir
+        path: ../..
+        skip: [node_modules, dist, .git]
+      - type: archive
+        url: https://github.com/electron/electron/releases/download/v33.4.11/electron-v33.4.11-linux-x64.zip
+        sha256: 212d431c7c916292311c797cd91f84467c5abd6e6983cf24b162efff64cee8a9
+        strip-components: 0
+        dest: electron
+      - type: script
+        dest-filename: streamsnap-launcher.sh
+        commands:
+          - exec zypak-wrapper /app/lib/streamsnap/electron/electron /app/lib/streamsnap/app/desktop/main.cjs "$@"

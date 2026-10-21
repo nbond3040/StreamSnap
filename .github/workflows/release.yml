@@ -1,0 +1,40 @@
+name: Build packages
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  rpm-appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: sudo apt-get update && sudo apt-get install -y rpm squashfs-tools desktop-file-utils
+      - run: npm ci
+      - run: npm test
+      - run: sh packaging/rpm/build.sh
+      - run: |
+          curl -sSLo appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          APPIMAGETOOL=$PWD/appimagetool sh packaging/appimage/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-appimage
+          path: |
+            dist/rpm/RPMS/x86_64/*.rpm
+            dist/*.AppImage
+
+  flatpak:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: StreamSnap.flatpak
+          manifest-path: packaging/flatpak/io.github.nbond3040.StreamSnap.yml
+          cache-key: flatpak-${{ github.sha }}
