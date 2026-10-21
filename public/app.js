@@ -530,45 +530,11 @@ async function settings() {
 }
 
 // ---------- router ----------
-// ---------- pop-out windows (a stream in its own window, e.g. on a second monitor) ----------
-if (location.hash.startsWith('#/popout/')) { window.__popout = true; document.body.classList.add('popout'); }
-function openPopout(path) {
-  const w = window.open(`${location.origin}/#/popout/${path}`, '_blank', 'popup,width=1100,height=640');
-  if (!w) toast('The pop-out window was blocked.');
-  return !!w;
-}
-async function popoutBoot(hash) {
-  const [, , kind, a, b] = hash.split('?')[0].split('/');
-  const q = new URLSearchParams(hash.split('?')[1] || '');
-  try {
-    if (kind === 'live') await Live.popout(Number(a), q.get('sel') ? JSON.parse(q.get('sel')) : { type: 'all' });
-    else if (kind === 'watch') await popoutWatch(a, b, q);
-  } catch (e) { document.body.append(h('div', { class: 'err', style: 'margin:24px;position:relative;z-index:99' }, e.message || String(e))); }
-}
-/** Rebuild the movie/episode context in the new window and carry on at the same quality, release and position. */
-async function popoutWatch(type, vid, q) {
-  const id = vid.split(':')[0];
-  const [meta, cfg] = await Promise.all([api(`/meta?type=${type}&id=${id}`), api('/config')]);
-  const base = { id, type, name: meta.name, poster: meta.poster, genres: meta.genres || [] };
-  let ctx;
-  if (type === 'series') { const episodes = buildEpisodes(meta, id); ctx = await buildContext(base, vid, episodes.find((e) => e.vid === vid) || null, episodes); }
-  else ctx = await buildContext(base, id, null);
-  if (!ctx.picks.length) throw new Error('No streams available right now.');
-  let res = ctx.picks.some((p) => p.resolution === q.get('res')) ? q.get('res') : bestPick(ctx, cfg.preferredResolution);
-  const same = q.get('f');
-  for (const p of ctx.picks) {
-    const hit = [p.stream, ...p.alternatives].find((x) => same && x.filename === same);
-    if (hit) { ctx = { ...ctx, picks: ctx.picks.map((r) => (r === p ? { ...r, stream: hit } : r)) }; res = p.resolution; break; }
-  }
-  Player.open(ctx, res, Number(q.get('t')) || 0);
-}
-
 // In-app history: lets the Back button return to the previous page and restore where you had scrolled to.
 const nav = { stack: [], scroll: new Map() };
 const goBack = () => (nav.stack.length > 1 ? history.back() : (location.hash = '#/'));
 
 async function route() {
-  if (window.__popout) return;
   const hash = location.hash || '#/';
   const [, page, a, b] = hash.split('/');
   const here = nav.stack[nav.stack.length - 1];
@@ -622,4 +588,4 @@ Promise.allSettled([api('/info'), api('/library'), api('/config')]).then(([info,
   if (info.status === 'fulfilled') APPINFO = info.value;
   if (lib.status === 'fulfilled') lib.value.library.forEach((m) => libraryIds.add(m.id));
   if (cfg.status === 'fulfilled') applyAppearance({ color: cfg.value.themeColor, mode: cfg.value.themeMode, black: cfg.value.pureBlack });
-}).finally(() => (window.__popout ? popoutBoot(location.hash) : route()));
+}).finally(route);

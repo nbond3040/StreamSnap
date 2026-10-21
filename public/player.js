@@ -355,11 +355,6 @@ const Player = (() => {
     } catch (e) { toast(e.message); }
   }
   $('#pExt').onclick = openExternal;
-  $('#pPop').onclick = () => {
-    if (!ctx || !stream) return;
-    const q = new URLSearchParams({ res: pick.resolution, t: String(Math.floor(cur())), f: stream.filename });
-    if (openPopout(`watch/${ctx.type}/${ctx.vid}?${q}`)) close(); // the pop-out carries on from here, so stop this one
-  };
 
   // ---------- chrome: idle hiding, keys, closing ----------
   function wake() {
@@ -379,7 +374,6 @@ const Player = (() => {
     for (const t of subTracks) t.track.mode = 'disabled';
     root.hidden = true; $('#pWarn').hidden = true; document.body.style.overflow = '';
     if (document.fullscreenElement) document.exitFullscreen();
-    if (window.__popout) { window.close(); return; }
     if (window.onPlayerClosed) onPlayerClosed();
   }
   addEventListener('keydown', (e) => {
