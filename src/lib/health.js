@@ -24,7 +24,15 @@ function track(key, { kind, mode, needKbps = 0 }) {
   return e;
 }
 
-function untrack(e) { if (streams.get(e.key) === e) streams.delete(e.key); if (e.stop) e.stop(); }
+// Best sustained download rate seen from the provider while something played: what we rank bitrates against.
+let measuredKbps = 0;
+const throughput = () => measuredKbps;
+function untrack(e) {
+  const k = e.samples && e.samples.length > 3 ? inKbps(e) : null;
+  if (k && e.kind !== 'live' && e.mode === 'direct') measuredKbps = Math.max(k, measuredKbps * 0.9);
+  if (streams.get(e.key) === e) streams.delete(e.key);
+  if (e.stop) e.stop();
+}
 
 /** Watch an ffmpeg child: parse -progress lines from stderr (keeping real errors apart) and sample its CPU use. */
 function watchFfmpeg(e, ff) {
@@ -92,4 +100,4 @@ function snapshot(key) {
 const active = () => streams.size;
 const entry = (key) => streams.get(key) || null;
 
-module.exports = { track, untrack, entry, watchFfmpeg, countIn, inKbps, verdict, snapshot, active, PROGRESS };
+module.exports = { throughput, track, untrack, entry, watchFfmpeg, countIn, inKbps, verdict, snapshot, active, PROGRESS };

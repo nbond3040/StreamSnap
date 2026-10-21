@@ -47,7 +47,8 @@ function redacted(cfg) {
   return { ...rest, hasXtreamPass: !!xtreamPass, hasRealDebridKey: !!realDebridKey, realDebridKeyHint: realDebridKey ? `…${realDebridKey.slice(-4)}` : '', hasTmdbKey: !!tmdbKey };
 }
 
-const publicStream = (s) => ({
+const rankOpts = (type) => ({ ffmpeg: player.available().ffmpeg, throughputKbps: health.throughput() || 0, runtimeMin: type === 'movie' ? 110 : 45 });
+const publicStream = (s) => ({ notes: s.notes || [], bit10: s.bit10, audio: s.audio,
   ref: s.ref, name: s.name, filename: s.filename, resolution: s.resolution, size: s.size, seeders: s.seeders,
   provider: s.provider, audioLangs: s.audioLangs, langs: [...detectLanguages(s).codes].map((c) => LANGS[c]?.name || c), cached: s.cached, hdr: s.hdr, source: s.source, codec: s.codec, languageMatch: s.languageMatch,
 });
@@ -338,14 +339,14 @@ function createServer(port) {
       try { all = await torrentio.fetchStreams(cfg, type, id); } catch (e) { throw new HttpError(502, e.message); }
       const tFetch = Date.now() - t0;
       for (const s of all) streamsByRef.set(s.ref, s);
-      let { picks, hidden } = selectStreams(all, cfg);
+      let { picks, hidden } = selectStreams(all, cfg, rankOpts(type));
       const t1 = Date.now();
       let verified = await verifyAudio(picks, cfg, hidden);
       const tVerify = Date.now() - t1;
       // Nothing in the user's language: better to offer every available stream (labelled) than an empty page.
       let languageFallback = false;
       if (!verified.length && all.length) {
-        const any = selectStreams(all, cfg, { ignoreLanguage: true });
+        const any = selectStreams(all, cfg, { ...rankOpts(type), ignoreLanguage: true });
         if (any.picks.length) { verified = any.picks; hidden = { ...any.hidden, language: 0 }; languageFallback = true; }
       }
       return {

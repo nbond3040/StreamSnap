@@ -61,6 +61,9 @@ function parseStream(s) {
     cam: /\b(cam|camrip|hdcam|ts|hdts|telesync|tc|scr|screener|hdtc)\b/i.test(text),
     source,
     codec,
+    bit10: /\b(10[- ]?bit|hi10p?|main ?10)\b/i.test(text),
+    audio: (/truehd|atmos/i.test(text) && 'truehd') || (/dts/i.test(text) && 'dts') || (/e-?ac-?3|dd\+|ddp/i.test(text) && 'eac3') ||
+      (/\bac-?3\b|dd5|dd2/i.test(text) && 'ac3') || (/aac/i.test(text) && 'aac') || (/opus/i.test(text) && 'opus') || '',
   };
 }
 
