@@ -576,5 +576,15 @@ const Live = (() => {
   });
   addEventListener('hashchange', close);
 
-  return { view, toggleFav };
+  /** Tune straight to a channel from elsewhere in the app (e.g. the NBA calendar). */
+  async function watchChannel(ch) {
+    if (!data) {
+      try { [data, cfg] = await Promise.all([api('/live/browse'), api('/config')]); fav = new Set(data.favorites); prepare(); }
+      catch (e) { return toast(e.message); }
+    }
+    state.sel = { type: 'all' }; state.q = '';
+    play(ch, [ch]);
+  }
+
+  return { view, toggleFav, watchChannel };
 })();

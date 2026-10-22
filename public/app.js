@@ -539,6 +539,7 @@ async function settings() {
       check('allowUncached', 'Allow streams not cached on Real-Debrid', 'Slow: Real-Debrid has to download them first.'),
       field('HDR / Dolby Vision', select('hdrPolicy', { allow: 'Allow', avoid: 'Avoid when an SDR option exists', only: 'HDR only' })),
       field('Downloads & recordings folder', text('downloadDir', 'text', '~/Videos/StreamSnap'), 'Absolute path. Leave blank for ~/Videos/StreamSnap.'),
+      check('calendarNba', 'Show NBA games on the calendar', 'Schedule and live scores. Games can be watched through your Live TV provider.'),
       check('autoplayNext', 'Autoplay next episode', 'When an episode ends, the next one starts after a short countdown. You can cancel it.'),
       check('subtitles', 'Fetch captions in my language', 'Captions are always off until you turn them on in the player.')),
     h('div', { class: 'card2' }, h('h2', {}, 'Playback'),
@@ -639,6 +640,7 @@ async function route() {
     else if (page === 'detail') await detail(a, b);
     else if (page === 'settings') await settings();
     else if (page === 'downloads') await offlineView();
+    else if (page === 'calendar') await Calendar.view();
   } catch (e) { view.replaceChildren(showErr(e)); }
   window.scrollTo(0, restore);
 }

@@ -34,6 +34,7 @@ const DEFAULTS = {
   preferredResolution: '1080p',// quality the Play button starts with
   resolutions: ['2160p', '1080p', '720p', '480p'],
   subtitles: true,
+  calendarNba: true,           // show NBA games on the calendar
   autoplayNext: true,          // start the next episode automatically when one ends
   downloadDir: '',             // where downloads and recordings are saved ('' = ~/Videos/StreamSnap)
   themeColor: 'violet',        // see COLORS in public/app.js

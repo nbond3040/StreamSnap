@@ -463,3 +463,40 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 #lpRecMenu { bottom:auto; top:48px; }
 .sc-rec { margin-left:.6em; background:none; border:0; color:#e5484d; cursor:pointer; vertical-align:middle; padding:0 .2em; }
 .sc-rec .ico { width:1em; height:1em; }
+
+/* ---- calendar ---- */
+.cal-head { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+.cal-nav { display:flex; align-items:center; gap:10px; } .cal-nav h2 { margin:0 8px; font-size:1.5rem; min-width:11ch; text-align:center; }
+.cal-filters { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.chipbtn { background:var(--s2); border:1px solid var(--line); color:var(--fg2); border-radius:999px; padding:7px 14px; cursor:pointer; }
+.chipbtn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.cal-grid { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.cal-dow { background:var(--s1); padding:8px 10px; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+.cal-cell { background:var(--bg); min-height:112px; padding:6px; display:flex; flex-direction:column; gap:3px; min-width:0; }
+.cal-cell.other { background:var(--s1); } .cal-cell.other .cal-day { opacity:.45; }
+.cal-cell.today .cal-day { background:var(--accent); color:#fff; border-radius:999px; }
+.cal-day { align-self:flex-start; min-width:24px; height:24px; line-height:24px; text-align:center; font-size:13px; padding:0 4px; }
+.cal-item { display:flex; justify-content:space-between; gap:6px; align-items:center; border:0; border-radius:6px; padding:3px 7px; font-size:12px; text-align:left; color:var(--fg); cursor:pointer; min-width:0; text-decoration:none; }
+.cal-item b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; } .cal-item span { color:var(--fg2); white-space:nowrap; flex:none; }
+.cal-item.ep { background:color-mix(in srgb, var(--accent) 22%, transparent); } .cal-item.ep.done { opacity:.5; }
+.cal-item.game { background:var(--s3); } .cal-item.game.live { background:color-mix(in srgb, #e5484d 28%, var(--s3)); } .cal-item.game.final span { color:var(--dim); }
+.cal-item:hover { filter:brightness(1.25); }
+.cal-more { background:none; border:0; color:var(--dim); font-size:12px; text-align:left; cursor:pointer; padding:2px 7px; } .cal-more:hover { color:var(--fg); }
+.livedot { width:8px; height:8px; border-radius:50%; background:#e5484d; display:inline-block; flex:none; animation:recpulse 1.2s infinite; }
+.gm-back { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; padding:16px; }
+.gm-card { position:relative; width:min(520px, 100%); max-height:90vh; overflow:auto; background:var(--s1); border:1px solid var(--line); border-radius:16px; padding:22px; box-shadow:0 20px 60px #000a; }
+.gm-close { position:absolute; top:10px; right:10px; }
+.gm-status { font-size:1.05rem; margin:2px 30px 14px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; } .gm-status small { color:var(--dim); }
+.gm-live { display:inline-flex; align-items:center; gap:7px; color:#ff8b8f; font-weight:700; }
+.gm-team { display:flex; align-items:center; gap:14px; padding:10px 0; } .gm-team img, .gm-logo { width:48px; height:48px; object-fit:contain; flex:none; }
+.gm-logo { display:grid; place-items:center; background:var(--s3); border-radius:50%; font-size:12px; font-weight:700; }
+.gm-name { flex:1; min-width:0; display:flex; flex-direction:column; } .gm-name small { color:var(--dim); }
+.gm-score { font-size:2rem; font-weight:800; font-variant-numeric:tabular-nums; } .gm-team:not(.win) .gm-score { }
+.gm-team.win .gm-name b, .gm-team.win .gm-score { color:var(--accent2); }
+.gm-meta { margin:6px 0 4px; font-size:13px; }
+.gm-streams { margin-top:16px; border-top:1px solid var(--line); padding-top:14px; }
+.gm-h { display:flex; gap:8px; align-items:center; font-weight:700; margin-bottom:10px; }
+.gm-ch { display:flex; align-items:center; gap:12px; padding:10px; border-radius:10px; } .gm-ch.best { background:var(--s2); }
+.gm-ch img, .gm-ch .gm-logo { width:36px; height:36px; } .gm-chname { flex:1; min-width:0; display:flex; flex-direction:column; } .gm-chname b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .gm-chname small { color:var(--dim); }
+@media (max-width:760px) { .cal-cell { min-height:84px; padding:3px; } .cal-item span { display:none; } }
+.gm-ch .btn .ico { color:#e5484d; }

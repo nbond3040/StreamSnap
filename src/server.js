@@ -24,6 +24,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 
 const streamsByRef = new Map(); // ref -> parsed stream (so the browser never handles URLs/keys)
 const offline = require('./lib/offline');
+const nba = require('./lib/nba');
 const resolved = new Map();     // ref -> { url, at }
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -433,6 +434,53 @@ function createServer(port) {
         try { const n = newEpisodeCount(data, id, await cinemeta.meta('series', id)); if (n) out[id] = n; } catch { /* offline: no badge */ }
       }));
       return out;
+    },
+    // ---- Calendar: episodes of series in the library + NBA games ----
+    async 'GET /api/calendar'(req, q) {
+      const iso = /^\d{4}-\d{2}-\d{2}$/;
+      const from = q.get('from'), to = q.get('to');
+      if (!iso.test(from || '') || !iso.test(to || '') || to < from || Date.parse(to) - Date.parse(from) > 62 * 86400000) throw new HttpError(400, 'bad date range');
+      const cfg = config.loadConfig(), data = config.loadData();
+      const series = new Map();
+      for (const m of [...data.library, ...(data.pinned || [])]) if (m.type === 'series') series.set(m.id, m);
+      for (const p of Object.values(data.progress)) if (p.meta && p.meta.type === 'series' && /^tt\d+$/.test(p.meta.id) && !series.has(p.meta.id)) series.set(p.meta.id, p.meta);
+      const episodes = [];
+      await Promise.all([...series.values()].slice(0, 80).map(async (m) => {
+        try {
+          const meta = await cinemeta.meta('series', m.id);
+          for (const v of (meta && meta.videos) || []) {
+            const day = typeof v.released === 'string' ? v.released.slice(0, 10) : '';
+            if (!(v.season > 0) || day < from || day > to) continue;
+            episodes.push({ kind: 'ep', series: m.id, name: m.name || meta.name, poster: m.poster || meta.poster || '', season: v.season, episode: v.episode, title: v.name || v.title || `Episode ${v.episode}`, date: day, watched: !!data.watched[`series:${m.id}:${v.season}:${v.episode}`] });
+          }
+        } catch { /* one series failing doesn't hide the rest */ }
+      }));
+      episodes.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name) || a.season - b.season || a.episode - b.episode);
+      let games = [], gamesError = '';
+      if (cfg.calendarNba) {
+        try { games = await nba.fetchRange(Date.parse(from) - 86400000, Date.parse(to) + 2 * 86400000); }
+        catch (e) { gamesError = e.message; }
+      }
+      return { episodes, games, gamesError, nba: !!cfg.calendarNba, hasLive: !!cfg.xtreamUrl };
+    },
+    // One game with fresh score/status and the best channels to watch it on (needs Live TV).
+    async 'GET /api/nba/game'(req, q) {
+      const id = q.get('id'), start = Number(q.get('start'));
+      if (!/^\d+$/.test(id || '') || !Number.isFinite(start)) throw new HttpError(400, 'bad game');
+      let games;
+      try { games = await nba.fetchRange(start - 86400000, start + 2 * 86400000); } catch (e) { throw new HttpError(502, e.message); }
+      const game = games.find((g) => g.id === id);
+      if (!game) throw new HttpError(404, 'That game isn\'t on the schedule any more.');
+      const cfg = config.loadConfig();
+      let streams = [];
+      if (cfg.xtreamUrl && cfg.xtreamUser && cfg.xtreamPass && game.state !== 'final' && !game.postponed) {
+        try {
+          const x = xtream.clientFor(cfg);
+          const cands = nba.matchChannels(game, await x.channels());
+          streams = await nba.confirmWithGuide(game, cands, (cid) => x.epg(cid, 6));
+        } catch { /* provider down: the card still shows the score */ }
+      }
+      return { game, streams: streams.slice(0, 8), hasLive: !!cfg.xtreamUrl, ends: game.start + nba.GAME_MS };
     },
     // ---- Downloads and DVR ----
     async 'GET /api/offline'() { return offline.list(); },

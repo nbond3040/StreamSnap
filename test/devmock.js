@@ -13,7 +13,7 @@ const BIG = Number(process.env.MOCK_CHANNELS || 0), BIGCATS = Number(process.env
 const posters = (n) => ({ poster: '', background: '', description: `Mock description for ${n}.`, imdbRating: '8.1', releaseInfo: '2024', genres: ['Drama'] });
 const movie = { id: 'tt0000001', imdb_id: 'tt0000001', type: 'movie', name: 'Mock Movie', ...posters('movie'), genres: ['Action', 'Drama'], runtime: '30 s' };
 const videos = [];
-for (const [s, n] of [[1, 3], [2, 2]]) for (let e = 1; e <= n; e++) videos.push({ season: s, episode: e, name: `Episode ${s}.${e}` });
+for (const [s, n] of [[1, 3], [2, 2]]) for (let e = 1; e <= n; e++) videos.push({ season: s, episode: e, name: `Episode ${s}.${e}`, released: new Date(Date.now() + ((s - 1) * 3 + e - 2) * 86400000).toISOString() });
 const series = { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Mock Series', ...posters('series'), genres: ['Comedy'], videos };
 
 const stream = (res, label, file, extra = '') => ({
@@ -54,6 +54,7 @@ http.createServer((req, res) => {
     if (act === 'get_live_streams') {
       const names = ['News One', 'World News', 'Sports HD', 'Arena Sports', 'Movie Max', 'Cinema Classics', 'News Today', 'Sports Extra', 'Film Four', 'Kids Zone', 'Nature TV', 'Music Hits'];
       const list = names.map((n, i) => ({ num: i + 1, name: (i % 3 === 2 ? 'UK| ' : 'US| ') + n.toUpperCase(), stream_id: 101 + i, stream_icon: '', category_id: String(i % 3 + 1) }));
+      list.push({ num: 20, name: 'US| ESPN HD', stream_id: 120, stream_icon: '', category_id: '2' }, { num: 21, name: 'US| ESPN 4K', stream_id: 121, stream_icon: '', category_id: '2' }, { num: 22, name: 'US| ESPN2 FHD', stream_id: 122, stream_icon: '', category_id: '2' }, { num: 23, name: 'NBA 03 | Lakers vs Celtics FHD', stream_id: 123, stream_icon: '', category_id: '2' });
       list.push({ num: 15, name: 'US| PPV EVENT (NOT LIVE)', stream_id: 115, stream_icon: '', category_id: '4' }, { num: 16, name: 'US| MISSING', stream_id: 116, stream_icon: '', category_id: '4' }, { num: 17, name: 'US| SLOW PROVIDER', stream_id: 117, stream_icon: '', category_id: '4' }, { num: 13, name: '##### SPORTS #####', stream_id: 113, stream_icon: '', category_id: '2' }, { num: 14, name: 'World Cup Live', stream_id: 114, stream_icon: '', category_id: '4' });
       return json(list);
     }
@@ -61,6 +62,20 @@ http.createServer((req, res) => {
       const b64 = (t) => Buffer.from(t).toString('base64'), now = Math.floor(Date.now() / 1000), id = q.get('stream_id');
       return json({ epg_listings: [[-1200, 2400, 'Morning Show'], [2400, 6000, 'Evening News'], [6000, 9600, 'Late Movie']].map(([a, z, t]) => ({ title: b64(`${t} ${id}`), description: b64(`About ${t}.`), start_timestamp: String(now + a), stop_timestamp: String(now + z) })) });
     }
+  }
+  if (u.pathname === '/nba/scoreboard') { // ESPN-shaped scoreboard: two games a day; today's are one live and one upcoming
+    const [a, b] = (u.searchParams.get('dates') || '').split('-');
+    const d0 = Date.UTC(+a.slice(0, 4), +a.slice(4, 6) - 1, +a.slice(6, 8)), d1 = b ? Date.UTC(+b.slice(0, 4), +b.slice(4, 6) - 1, +b.slice(6, 8)) : d0;
+    const pairs = [['Boston Celtics', 'Celtics', 'BOS', 2, 'Los Angeles Lakers', 'Lakers', 'LAL', 13], ['Golden State Warriors', 'Warriors', 'GS', 9, 'Miami Heat', 'Heat', 'MIA', 14]];
+    const events = []; const now = Date.now();
+    for (let t = d0, k = 0; t <= d1; t += 86400000, k++) pairs.forEach((p, i) => {
+      const start = t + (i ? 3 : 0) * 3600000 + 23 * 3600000 + 30 * 60000;
+      const state = now > start + 3 * 3600000 ? 'post' : now >= start ? 'in' : 'pre';
+      const comp = (ha, nm, nick, ab, id, sc) => ({ homeAway: ha, score: state === 'pre' ? '0' : String(sc), winner: state === 'post' && sc > 100, team: { id: String(id), abbreviation: ab, displayName: nm, shortDisplayName: nick, logo: '' }, records: [{ summary: '5-1' }] });
+      events.push({ id: String(400000 + Math.round(t / 86400000) * 2 + i), date: new Date(start).toISOString(), status: { type: { state, shortDetail: state === 'post' ? 'Final' : state === 'in' ? 'Q3 4:12' : '7:30 PM ET', description: state } },
+        competitions: [{ venue: { fullName: 'Mock Arena' }, broadcasts: [{ names: ['ESPN'] }], competitors: [comp('home', p[0], p[1], p[2], p[3], 104), comp('away', p[4], p[5], p[6], p[7], 98)] }] });
+    });
+    return json({ events });
   }
   if (u.pathname === '/live/u/p/117.ts') { // a provider that can't keep up: about 30 kB/s, far below the stream's own bitrate
     res.writeHead(200, { 'content-type': 'video/mp2t' });
