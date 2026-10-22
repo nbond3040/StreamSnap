@@ -41,16 +41,40 @@ function normalize(ev) {
   };
 }
 
+async function getEvents(key) {
+  const url = `${BASE()}/scoreboard?dates=${key}`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { accept: 'application/json' } });
+  if (!r.ok) {
+    const body = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 120);
+    throw Object.assign(new Error(`The NBA schedule service answered ${r.status} for dates=${key}${body ? ` (${body})` : ''}`), { status: r.status });
+  }
+  return ((await r.json()).events || []);
+}
+
+/** A range in one request; if the service refuses it, week by week, then day by day, keeping whatever answers. */
+async function eventsFor(fromMs, toMs) {
+  try { return await getEvents(`${ymd(fromMs)}-${ymd(toMs)}`); }
+  catch (e) { if (e.status !== 400 && e.status !== 404 && e.status !== 422) throw e; }
+  const out = new Map(); let lastErr = null, ok = 0;
+  const day = (ms) => ymd(ms);
+  const tryKey = async (key) => { try { for (const ev of await getEvents(key)) out.set(String(ev.id), ev); ok++; return true; } catch (e) { lastErr = e; return false; } };
+  for (let t = fromMs; t <= toMs; t += 7 * 86400000) {
+    const end = Math.min(toMs, t + 6 * 86400000);
+    if (await tryKey(`${day(t)}-${day(end)}`)) continue;
+    const days = []; for (let d = t; d <= end; d += 86400000) days.push(day(d));
+    for (let i = 0; i < days.length; i += 4) await Promise.all(days.slice(i, i + 4).map(tryKey));
+  }
+  if (!ok) throw lastErr || new Error('The NBA schedule service refused the request');
+  return [...out.values()];
+}
+
 async function fetchRange(fromMs, toMs, now = Date.now()) {
   const key = `${ymd(fromMs)}-${ymd(toMs)}`;
   const hit = cache.get(key);
   const ttl = hit && hit.live ? LIVE_MS : FRESH_MS;
   if (hit && now - hit.at < ttl) return hit.games;
   try {
-    const r = await fetch(`${BASE()}/scoreboard?dates=${key}&limit=1000`, { signal: AbortSignal.timeout(15000), headers: { accept: 'application/json' } });
-    if (!r.ok) throw new Error(`The NBA schedule service answered ${r.status}`);
-    const j = await r.json();
-    const games = (j.events || []).map(normalize).filter(Boolean).sort((a, b) => a.start - b.start);
+    const games = (await eventsFor(fromMs, toMs)).map(normalize).filter(Boolean).sort((a, b) => a.start - b.start);
     cache.set(key, { at: now, games, live: games.some((g) => g.state === 'live') });
     if (cache.size > 40) cache.delete(cache.keys().next().value);
     return games;

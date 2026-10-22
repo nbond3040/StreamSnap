@@ -60,3 +60,25 @@ test('the programme guide confirms and promotes a channel', async () => {
   assert.equal(out[0].id, 2);
   assert.equal(out[0].why, 'Guide lists this game');
 });
+
+test('a service that rejects date ranges is queried week by week and day by day', async () => {
+  const seen = [];
+  const srv = http.createServer((req, res) => {
+    const d = new URL(req.url, 'http://x').searchParams.get('dates'); seen.push(d);
+    if (d.includes('-')) { res.writeHead(400); return res.end('bad range'); }   // ranges are refused, single days work
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ events: [ev('d' + d, `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T23:30Z`, 'pre', 0, 0)] }));
+  }).listen(0);
+  await new Promise((r) => srv.once('listening', r));
+  process.env.STREAMSNAP_NBA_URL = `http://127.0.0.1:${srv.address().port}`;
+  nba._cache.clear();
+  const games = await nba.fetchRange(Date.UTC(2026, 9, 1), Date.UTC(2026, 9, 10));
+  assert.equal(games.length, 10);
+  assert.ok(seen.some((d) => !d.includes('-')));
+  nba._cache.clear();
+  const bad = http.createServer((q, s) => { s.writeHead(400); s.end('nope'); }).listen(0);
+  await new Promise((r) => bad.once('listening', r));
+  process.env.STREAMSNAP_NBA_URL = `http://127.0.0.1:${bad.address().port}`;
+  await assert.rejects(nba.fetchRange(Date.UTC(2026, 9, 1), Date.UTC(2026, 9, 3)), /answered 400 for dates=.*nope/);
+  srv.close(); bad.close(); delete process.env.STREAMSNAP_NBA_URL;
+});
