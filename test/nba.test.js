@@ -26,7 +26,7 @@ test('the schedule is fetched once per range and cached', async () => {
   const srv = http.createServer((req, res) => { hits++; url = req.url; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ events: [ev('2', '2026-10-23T00:00Z', 'pre', 0, 0), ev('1', '2026-10-22T23:30Z', 'post', 100, 90)] })); }).listen(0);
   await new Promise((r) => srv.once('listening', r));
   process.env.STREAMSNAP_NBA_URL = `http://127.0.0.1:${srv.address().port}`;
-  nba._cache.clear();
+  nba._reset();
   const a = await nba.fetchRange(Date.UTC(2026, 9, 22), Date.UTC(2026, 9, 30));
   const b = await nba.fetchRange(Date.UTC(2026, 9, 22), Date.UTC(2026, 9, 30));
   assert.equal(hits, 1); assert.equal(a, b);
@@ -71,11 +71,14 @@ test('a service that rejects date ranges is queried week by week and day by day'
   }).listen(0);
   await new Promise((r) => srv.once('listening', r));
   process.env.STREAMSNAP_NBA_URL = `http://127.0.0.1:${srv.address().port}`;
-  nba._cache.clear();
+  nba._reset();
   const games = await nba.fetchRange(Date.UTC(2026, 9, 1), Date.UTC(2026, 9, 10));
   assert.equal(games.length, 10);
   assert.ok(seen.some((d) => !d.includes('-')));
-  nba._cache.clear();
+  const before = seen.length;
+  await nba.fetchRange(Date.UTC(2026, 9, 11), Date.UTC(2026, 9, 14));
+  assert.ok(seen.slice(before).every((d) => !d.includes('-')), 'the refusal is remembered, ranges are not tried again');
+  nba._reset();
   const bad = http.createServer((q, s) => { s.writeHead(400); s.end('nope'); }).listen(0);
   await new Promise((r) => bad.once('listening', r));
   process.env.STREAMSNAP_NBA_URL = `http://127.0.0.1:${bad.address().port}`;

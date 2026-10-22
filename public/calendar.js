@@ -10,15 +10,15 @@ const Calendar = (() => {
   const store = (k, v) => { try { v === undefined ? 0 : localStorage.setItem(k, JSON.stringify(v)); } catch { /* optional */ } };
   const recall = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 
-  const st = { y: 0, m: 0, eps: recall('ss.cal.eps', true), nba: recall('ss.cal.nba', true), team: recall('ss.cal.team', ''), data: null, open: null };
+  const st = { y: 0, m: 0, eps: recall('ss.cal.eps', true), nba: recall('ss.cal.nba', true), teams: new Set(recall('ss.cal.teams', [])), only: recall('ss.cal.only', false), teamsOpen: false, data: null, open: null };
   const cache = new Map();   // "from|to" -> { at, data }
   let token = 0, refreshTimer = null;
 
-  async function load() {
-    const first = new Date(st.y, st.m, 1), start = new Date(first); start.setDate(1 - first.getDay());
+  async function load(y = st.y, m = st.m, reuse = false) {
+    const first = new Date(y, m, 1), start = new Date(first); start.setDate(1 - first.getDay());
     const end = new Date(start); end.setDate(start.getDate() + 41);
     const from = dayKey(start), to = dayKey(end), key = from + '|' + to, hit = cache.get(key);
-    if (hit && Date.now() - hit.at < 60 * 1000) return { from, to, start, data: hit.data };
+    if (hit && (reuse || Date.now() - hit.at < 60 * 1000)) return { from, to, start, data: hit.data };
     const data = await api(`/calendar?from=${from}&to=${to}`);
     cache.set(key, { at: Date.now(), data });
     return { from, to, start, data };
@@ -29,24 +29,25 @@ const Calendar = (() => {
     return [`${g.away.abbr} ${g.away.score ?? ''}  ${g.home.abbr} ${g.home.score ?? ''}`, g.state === 'live' ? g.detail || 'Live' : 'Final'];
   }
 
-  async function draw() {
+  async function draw(reuse = false) {
     const my = ++token, root = view();
+    root.querySelector('.cal-grid')?.classList.add('loading');   // keep the old month on screen (dimmed) while the next one loads
     const first = new Date(st.y, st.m, 1);
     let res;
-    try { res = await load(); } catch (e) { if (my === token) root.replaceChildren(h('div', { class: 'empty' }, e.message)); return; }
+    try { res = await load(st.y, st.m, reuse); } catch (e) { if (my === token) root.replaceChildren(h('div', { class: 'empty' }, e.message)); return; }
     if (my !== token) return;
     const { data, start } = res;
     st.data = data;
     const teams = new Map();
     for (const g of data.games) { teams.set(g.home.abbr, g.home.name); teams.set(g.away.abbr, g.away.name); }
-    if (st.team && !teams.has(st.team) && teams.size) st.team = '';
 
     const byDay = new Map();
     const add = (k, item) => { if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(item); };
     if (st.eps) for (const e of data.episodes) add(e.date, { t: 'ep', e });
     if (st.nba && data.nba) for (const g of data.games) {
-      if (st.team && g.home.abbr !== st.team && g.away.abbr !== st.team) continue;
-      add(dayKey(new Date(g.start)), { t: 'game', g });
+      const mine = st.teams.has(g.home.abbr) || st.teams.has(g.away.abbr);
+      if (st.teams.size && st.only && !mine) continue;
+      add(dayKey(new Date(g.start)), { t: 'game', g, mine });
     }
 
     const todayKey = dayKey(new Date());
@@ -57,19 +58,19 @@ const Calendar = (() => {
       const open = st.open === k, shown = open ? items : items.slice(0, 3);
       cells.push(h('div', { class: 'cal-cell' + (d.getMonth() !== st.m ? ' other' : '') + (k === todayKey ? ' today' : '') + (open ? ' open' : '') },
         h('div', { class: 'cal-day' }, String(d.getDate())),
-        ...shown.map((it) => (it.t === 'ep' ? epChip(it.e) : gameChip(it.g))),
+        ...shown.map((it) => (it.t === 'ep' ? epChip(it.e) : gameChip(it.g, st.teams.size ? (it.mine ? 'hl' : 'dim') : ''))),
         items.length > 3 && h('button', { class: 'cal-more', onclick: () => { st.open = open ? null : k; draw(); } }, open ? 'Show less' : `+${items.length - 3} more`)));
     }
 
     const nav = (dm) => () => { const d = new Date(st.y, st.m + dm, 1); st.y = d.getFullYear(); st.m = d.getMonth(); st.open = null; draw(); };
-    const toggle = (label, key, on) => h('button', { class: 'chipbtn' + (on ? ' on' : ''), 'aria-pressed': String(on), onclick: () => { st[key] = !st[key]; store('ss.cal.' + key, st[key]); draw(); } }, label);
-    const teamSel = teams.size && st.nba ? h('select', { class: 'pill', 'aria-label': 'Team', onchange: (e) => { st.team = e.target.value; store('ss.cal.team', st.team); draw(); } },
-      h('option', { value: '' }, 'All teams'), [...teams.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([abbr, name]) => h('option', { value: abbr, selected: abbr === st.team }, name))) : null;
+    const toggle = (label, key, on) => h('button', { class: 'chipbtn' + (on ? ' on' : ''), 'aria-pressed': String(on), onclick: () => { st[key] = !st[key]; store('ss.cal.' + key, st[key]); draw(true); } }, label);
+    const teamSel = teams.size && st.nba ? teamPicker(teams) : null;
 
     const notes = [];
     if (data.nba && data.gamesError) notes.push(h('div', { class: 'notice warn' }, 'Couldn’t load the NBA schedule: ' + data.gamesError));
     if (!data.episodes.length && st.eps && !st.nba) notes.push(h('div', { class: 'subtle', style: 'margin-bottom:10px' }, 'No episodes airing this month for series in your library.'));
 
+    prefetchNeighbours();
     root.replaceChildren(
       h('div', { class: 'cal-head' },
         h('div', { class: 'cal-nav' },
@@ -84,13 +85,40 @@ const Calendar = (() => {
       ...(data.nba ? [] : [h('p', { class: 'subtle', style: 'margin-top:14px' }, 'NBA games are turned off. Turn them on in ', h('a', { href: '#/settings' }, 'Settings'), '.')]));
   }
 
+  // Check any number of teams: their games are highlighted (the rest dimmed), or the rest hidden with "Only these teams".
+  function teamPicker(teams) {
+    const list = [...teams.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    const save = () => { store('ss.cal.teams', [...st.teams]); draw(true); };
+    const panel = h('div', { class: 'team-panel', hidden: !st.teamsOpen, onclick: (e) => e.stopPropagation() },
+      h('div', { class: 'team-actions' },
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: st.only, onchange: (e) => { st.only = e.target.checked; store('ss.cal.only', st.only); draw(true); } }), h('span', {}, 'Only these teams')),
+        h('button', { class: 'btn ghost sm', onclick: () => { st.teams.clear(); save(); } }, 'Clear')),
+      h('div', { class: 'team-list', onscroll: (e) => { st.panelScroll = e.target.scrollTop; } }, list.map(([abbr, name]) => h('label', { class: 'team-opt' },
+        h('input', { type: 'checkbox', checked: st.teams.has(abbr), onchange: (e) => { e.target.checked ? st.teams.add(abbr) : st.teams.delete(abbr); save(); } }), h('span', {}, name)))));
+    requestAnimationFrame(() => { const l = panel.querySelector('.team-list'); if (l) l.scrollTop = st.panelScroll || 0; });
+    return h('div', { class: 'menuwrap' },
+      h('button', { class: 'chipbtn' + (st.teams.size ? ' on' : ''), 'aria-expanded': String(st.teamsOpen), onclick: (e) => { e.stopPropagation(); st.teamsOpen = !st.teamsOpen; panel.hidden = !st.teamsOpen; e.currentTarget.setAttribute('aria-expanded', String(st.teamsOpen)); } },
+        st.teams.size ? `Teams (${st.teams.size})` : 'Teams'), panel);
+  }
+  document.addEventListener('click', () => { const p = document.querySelector('.team-panel'); if (st.teamsOpen && p) { st.teamsOpen = false; p.hidden = true; } });
+
+  // Next and previous month load quietly in the background so paging feels instant.
+  let prefetchTimer;
+  function prefetchNeighbours() {
+    clearTimeout(prefetchTimer);
+    const y = st.y, m = st.m;
+    prefetchTimer = setTimeout(() => {
+      for (const d of [1, -1]) { const t = new Date(y, m + d, 1); load(t.getFullYear(), t.getMonth()).catch(() => {}); }
+    }, 300);
+  }
+
   function epChip(e) {
     return h('a', { class: 'cal-item ep' + (e.watched ? ' done' : ''), href: `#/detail/series/${e.series}`, title: `${e.name} · S${e.season} E${e.episode} · ${e.title}` },
       h('b', {}, e.name), h('span', {}, `S${e.season} E${e.episode}`));
   }
-  function gameChip(g) {
+  function gameChip(g, mark) {
     const [a, b] = gameLabel(g);
-    return h('button', { class: 'cal-item game ' + g.state, onclick: () => openGame(g), title: `${g.away.name} at ${g.home.name}` },
+    return h('button', { class: 'cal-item game ' + g.state + (mark ? ' ' + mark : ''), onclick: () => openGame(g), title: `${g.away.name} at ${g.home.name}` },
       g.state === 'live' && h('i', { class: 'livedot' }), h('b', {}, a), h('span', {}, b));
   }
 

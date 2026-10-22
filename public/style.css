@@ -500,3 +500,11 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 .gm-ch img, .gm-ch .gm-logo { width:36px; height:36px; } .gm-chname { flex:1; min-width:0; display:flex; flex-direction:column; } .gm-chname b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .gm-chname small { color:var(--dim); }
 @media (max-width:760px) { .cal-cell { min-height:84px; padding:3px; } .cal-item span { display:none; } }
 .gm-ch .btn .ico { color:#e5484d; }
+
+.cal-grid.loading { opacity:.55; transition:opacity .15s; }
+.cal-item.game.hl { background:var(--accent); color:#fff; box-shadow:0 0 0 1px var(--accent2); } .cal-item.game.hl span { color:#fff; }
+.cal-item.game.dim { opacity:.4; }
+.team-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:min(420px, 90vw); background:var(--s1); border:1px solid var(--line); border-radius:12px; padding:12px; box-shadow:0 12px 40px #000a; }
+.team-actions { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+.team-list { display:grid; grid-template-columns:1fr 1fr; gap:2px 14px; max-height:50vh; overflow:auto; }
+.team-opt { display:flex; align-items:center; gap:8px; padding:5px 4px; border-radius:6px; cursor:pointer; font-size:14px; } .team-opt:hover { background:var(--s3); }

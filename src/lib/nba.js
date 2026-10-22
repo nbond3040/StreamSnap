@@ -51,19 +51,44 @@ async function getEvents(key) {
   return ((await r.json()).events || []);
 }
 
-/** A range in one request; if the service refuses it, week by week, then day by day, keeping whatever answers. */
-async function eventsFor(fromMs, toMs) {
-  try { return await getEvents(`${ymd(fromMs)}-${ymd(toMs)}`); }
-  catch (e) { if (e.status !== 400 && e.status !== 404 && e.status !== 422) throw e; }
-  const out = new Map(); let lastErr = null, ok = 0;
-  const day = (ms) => ymd(ms);
-  const tryKey = async (key) => { try { for (const ev of await getEvents(key)) out.set(String(ev.id), ev); ok++; return true; } catch (e) { lastErr = e; return false; } };
-  for (let t = fromMs; t <= toMs; t += 7 * 86400000) {
-    const end = Math.min(toMs, t + 6 * 86400000);
-    if (await tryKey(`${day(t)}-${day(end)}`)) continue;
-    const days = []; for (let d = t; d <= end; d += 86400000) days.push(day(d));
-    for (let i = 0; i < days.length; i += 4) await Promise.all(days.slice(i, i + 4).map(tryKey));
+// Requests are made per week (Sunday-aligned, so neighbouring months share them) or, when the service accepts it,
+// as one range. Which one works is learned once and remembered, so a refusing service isn't asked twice.
+let mode = 'range';                          // 'range' -> 'week' -> 'day' (only ever steps down)
+const chunkCache = new Map();                // "dates" key -> { at, events }
+const WEEK = 7 * 86400000;
+const startOfWeek = (ms) => { const d = new Date(ms); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - d.getUTCDay()); };
+
+async function cachedChunk(key, now) {
+  const hit = chunkCache.get(key);
+  if (hit && now - hit.at < (hit.live ? LIVE_MS : FRESH_MS)) return hit.events;
+  try {
+    const events = await getEvents(key);
+    chunkCache.set(key, { at: now, events, live: events.some((e) => (((e.status || {}).type || {}).state) === 'in') });
+    if (chunkCache.size > 400) chunkCache.delete(chunkCache.keys().next().value);
+    return events;
+  } catch (e) { if (hit && now - hit.at < STALE_MS) return hit.events; throw e; }
+}
+
+async function inBatches(keys, n, fn) {
+  const out = []; let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, keys.length) }, async () => { while (i < keys.length) { const k = keys[i++]; out.push(await fn(k)); } }));
+  return out;
+}
+
+async function eventsFor(fromMs, toMs, now) {
+  if (mode === 'range') {
+    try { return await cachedChunk(`${ymd(fromMs)}-${ymd(toMs)}`, now); }
+    catch (e) { if (e.status !== 400 && e.status !== 404 && e.status !== 422) throw e; mode = 'week'; }
   }
+  const keys = [];
+  if (mode === 'week') for (let t = startOfWeek(fromMs); t <= toMs; t += WEEK) keys.push(`${ymd(t)}-${ymd(t + 6 * 86400000)}`);
+  else for (let t = fromMs; t <= toMs; t += 86400000) keys.push(ymd(t));
+  const out = new Map(); let lastErr = null, ok = 0, refused = 0;
+  await inBatches(keys, 6, async (k) => {
+    try { for (const ev of await cachedChunk(k, now)) out.set(String(ev.id), ev); ok++; }
+    catch (e) { lastErr = e; if (e.status === 400 || e.status === 404 || e.status === 422) refused++; }
+  });
+  if (!ok && mode === 'week' && refused) { mode = 'day'; return eventsFor(fromMs, toMs, now); }   // weeks refused too: single days
   if (!ok) throw lastErr || new Error('The NBA schedule service refused the request');
   return [...out.values()];
 }
@@ -74,7 +99,7 @@ async function fetchRange(fromMs, toMs, now = Date.now()) {
   const ttl = hit && hit.live ? LIVE_MS : FRESH_MS;
   if (hit && now - hit.at < ttl) return hit.games;
   try {
-    const games = (await eventsFor(fromMs, toMs)).map(normalize).filter(Boolean).sort((a, b) => a.start - b.start);
+    const games = (await eventsFor(fromMs, toMs, now)).map(normalize).filter(Boolean).sort((a, b) => a.start - b.start);
     cache.set(key, { at: now, games, live: games.some((g) => g.state === 'live') });
     if (cache.size > 40) cache.delete(cache.keys().next().value);
     return games;
@@ -159,4 +184,4 @@ async function confirmWithGuide(game, cands, epgFor, top = 10) {
   return cands.sort((a, b) => b.score - a.score || a.num - b.num);
 }
 
-module.exports = { fetchRange, normalize, matchChannels, confirmWithGuide, qualityOf, _cache: cache, GAME_MS };
+module.exports = { fetchRange, normalize, matchChannels, confirmWithGuide, qualityOf, _cache: cache, _reset() { cache.clear(); chunkCache.clear(); mode = 'range'; }, GAME_MS };
