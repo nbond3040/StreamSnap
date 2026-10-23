@@ -86,3 +86,22 @@ test('a scheduled recording starts, records and stops on time', async () => {
 test('recordings that were missed or too long are rejected sensibly', () => {
   assert.throws(() => offline.schedule({ channelId: '5', name: 'x', start: Date.now(), end: Date.now() + 13 * 3600 * 1000 }), /isn't valid/);
 });
+
+const { spawnSync } = require('child_process');
+const haveFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
+test('a recording with a timestamp jump is remuxed to a seekable file with the true duration', { skip: !haveFfmpeg && 'ffmpeg not installed' }, async () => {
+  const dir = path.join(home, 'rm'); fs.mkdirSync(dir, { recursive: true });
+  const mk = (name, extra) => spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=d=6:s=160x90:r=25', '-f', 'lavfi', '-i', 'sine=d=6', '-c:v', 'libx264', '-g', '25', '-c:a', 'aac', ...extra, '-f', 'mpegts', path.join(dir, name)]);
+  mk('a.ts', []); mk('b.ts', ['-output_ts_offset', '5000']);
+  const ts = path.join(dir, 'rec.ts');
+  fs.writeFileSync(ts, Buffer.concat([fs.readFileSync(path.join(dir, 'a.ts')), fs.readFileSync(path.join(dir, 'b.ts'))]));
+  const dur = (f) => parseFloat(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).stdout.toString());
+  assert.ok(dur(ts) > 1000, 'the raw recording claims a huge duration');
+  const rec = offline.schedule({ channelId: '9', name: 'Jump', start: Date.now(), end: Date.now() + 60000 });
+  config.saveData({ ...config.loadData(), recordings: config.loadData().recordings.map((r) => (r.id === rec.id ? { ...r, status: 'done', file: ts, bytes: fs.statSync(ts).size } : r)) });
+  assert.equal(await offline.remux(rec.id), true);
+  const after = offline.find(rec.id);
+  assert.match(after.file, /\.mkv$/); assert.ok(!fs.existsSync(ts));
+  assert.ok(Math.abs(dur(after.file) - 12) < 1.5, 'duration ' + dur(after.file));
+  offline.remove(rec.id);
+});

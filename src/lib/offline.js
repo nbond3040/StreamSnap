@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const { Readable } = require('stream');
 const config = require('./config');
 
@@ -51,6 +52,7 @@ function publicJob(j, kind) {
   let size = j.bytes || 0;
   if (live && live.length) size = live[live.length - 1][1];
   if (kind === 'rec' && j.status === 'recording' && file) { try { size = fs.statSync(file).size; } catch { /* not created yet */ } }
+  if (kind === 'rec' && remuxing.has(j.id)) rest.status = 'processing';
   return { ...rest, kind, kbps: j.status === 'downloading' ? kbps : 0, bytes: size, playable: j.status === 'done' };
 }
 
@@ -188,6 +190,7 @@ async function recordOne(rec, liveUrl) {
 /** Start whatever is due. Called every few seconds. */
 function tick({ liveUrlFor }) {
   const now = Date.now();
+  if (!remuxing.size) { const r = load().recordings.find((x) => x.status === 'done' && /\.ts$/i.test(x.file || '') && !x.remuxFailed && !active.has(x.id)); if (r) remux(r.id); }
   for (const r of load().recordings) {
     if (r.status === 'recording' && !active.has(r.id)) patch('recordings', r.id, { status: 'done' });   // the app restarted mid-recording: keep what was saved
     if (r.status !== 'scheduled') continue;
@@ -197,6 +200,32 @@ function tick({ liveUrlFor }) {
     if (!url) { patch('recordings', r.id, { status: 'error', error: 'Live TV isn\'t set up.' }); continue; }
     recordOne(r, url);
   }
+}
+
+// A recording is raw transport stream, appended across any reconnects. Its timestamps jump where the provider dropped us,
+// so players see a wrong duration and seeking lands in empty space. Remuxing (no re-encoding) straightens the timeline
+// and adds a seek index; it takes a couple of seconds per hour of video.
+const remuxing = new Map();   // id -> Promise<boolean>
+function remux(id) {
+  if (remuxing.has(id)) return remuxing.get(id);
+  const j = load().recordings.find((x) => x.id === id);
+  if (!j || j.status !== 'done' || !j.file || !/\.ts$/i.test(j.file) || j.remuxFailed || !fs.existsSync(j.file)) return Promise.resolve(false);
+  const out = j.file.replace(/\.ts$/i, '.mkv'), tmp = out + '.part';
+  const p = new Promise((resolve) => {
+    const ff = spawn('ffmpeg', ['-v', 'error', '-nostdin', '-y', '-fflags', '+genpts+discardcorrupt', '-i', j.file, '-map', '0:v:0?', '-map', '0:a?', '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-f', 'matroska', tmp], { stdio: 'ignore' });
+    const fail = () => { try { fs.unlinkSync(tmp); } catch { /* none */ } patch('recordings', id, { remuxFailed: true }); resolve(false); };
+    ff.on('error', fail);
+    ff.on('close', (code) => {
+      let size = 0; try { size = fs.statSync(tmp).size; } catch { /* none */ }
+      if (code !== 0 || size < 1e5) return fail();
+      try { fs.renameSync(tmp, out); fs.unlinkSync(j.file); } catch { return fail(); }
+      patch('recordings', id, { file: out, bytes: size });
+      resolve(true);
+    });
+  });
+  remuxing.set(id, p);
+  p.finally(() => remuxing.delete(id));
+  return p;
 }
 
 function stopRecording(id) {
@@ -227,7 +256,7 @@ function serveFile(req, res, id) {
     if (start > end || start >= st.size) { res.writeHead(416, { 'content-range': `bytes */${st.size}` }); return res.end(); }
     status = 206;
   }
-  const type = /\.mp4|\.m4v$/i.test(file) ? 'video/mp4' : /\.webm$/i.test(file) ? 'video/webm' : /\.ts$/i.test(file) ? 'video/mp2t' : 'application/octet-stream';
+  const type = /\.mkv$/i.test(file) ? 'video/x-matroska' : /\.mp4|\.m4v$/i.test(file) ? 'video/mp4' : /\.webm$/i.test(file) ? 'video/webm' : /\.ts$/i.test(file) ? 'video/mp2t' : 'application/octet-stream';
   const h = { 'content-type': type, 'accept-ranges': 'bytes', 'content-length': end - start + 1 };
   if (status === 206) h['content-range'] = `bytes ${start}-${end}/${st.size}`;
   res.writeHead(status, h);
@@ -236,4 +265,4 @@ function serveFile(req, res, id) {
   rs.pipe(res);
 }
 
-module.exports = { list, find, addDownload, pumpDownloads, pauseDownload, resumeDownload, schedule, tick, stopRecording, remove, serveFile, rootDir, active };
+module.exports = { remux, list, find, addDownload, pumpDownloads, pauseDownload, resumeDownload, schedule, tick, stopRecording, remove, serveFile, rootDir, active };

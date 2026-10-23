@@ -496,9 +496,10 @@ function createServer(port) {
     async 'POST /api/offline/remove'(req) { offline.remove(String((await readBody(req)).id)); return { ok: true }; },
     // Make a finished download/recording playable by the normal player; returns a stream the client can open.
     async 'GET /api/offline/play'(req, q) {
-      const j = offline.find(q.get('id'));
+      let j = offline.find(q.get('id'));
+      if (j && j.channelId && j.status === 'done' && /\.ts$/i.test(j.file || '')) { await offline.remux(j.id); j = offline.find(j.id); }   // fix the timeline first, or seeking breaks
       if (!j || j.status !== 'done' || !j.file) throw new HttpError(404, 'That file isn\'t ready.');
-      const ref = crypto.createHash('sha1').update('offline:' + j.id).digest('hex').slice(0, 20);
+      const ref = crypto.createHash('sha1').update('offline:' + j.id + ':' + path.basename(j.file)).digest('hex').slice(0, 20);
       const isRec = !!j.channelId;
       const st = { ref, url: `http://${req.headers.host}/api/file/${j.id}`, name: j.title, filename: path.basename(j.file), resolution: isRec ? 'Recording' : j.resolution, size: j.bytes || j.total || 0, seeders: 0, provider: 'Offline', languageLine: '', cached: true, hdr: false, source: '', codec: '', forceCompat: isRec };
       streamsByRef.set(ref, st);

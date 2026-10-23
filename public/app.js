@@ -593,7 +593,7 @@ async function offlineView() {
       h('div', { class: 'dlbtns' }, btns));
   }
   function recRow(r) {
-    const st = { scheduled: `Scheduled · ${clockT(r.start)} – ${clockT(r.end).split(', ').pop()}`, recording: `Recording now · ${fmtGB(r.bytes)} · until ${clockT(r.end).split(', ').pop()}`, done: `${clockT(r.start)} · ${fmtGB(r.bytes)}`, error: r.error || 'Failed' }[r.status] || r.status;
+    const st = { scheduled: `Scheduled · ${clockT(r.start)} – ${clockT(r.end).split(', ').pop()}`, recording: `Recording now · ${fmtGB(r.bytes)} · until ${clockT(r.end).split(', ').pop()}`, done: `${clockT(r.start)} · ${fmtGB(r.bytes)}`, processing: 'Finishing up… (making it seekable)', error: r.error || 'Failed' }[r.status] || r.status;
     const btns = [];
     if (r.status === 'done') btns.push(h('button', { class: 'btn sm', onclick: () => playOffline(r.id) }, '▶ Play'));
     if (r.status === 'recording') btns.push(h('button', { class: 'btn ghost sm', onclick: act('/dvr/stop', r.id) }, 'Stop'));
