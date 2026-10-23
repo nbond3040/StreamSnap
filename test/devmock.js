@@ -48,6 +48,18 @@ http.createServer((req, res) => {
   if (u.pathname.startsWith('/3/find/')) return json({ movie_results: u.pathname.endsWith('tt0000001') ? [{ id: 100 }] : [] });
   if (u.pathname === '/3/movie/100') return json({ belongs_to_collection: { id: 9, name: 'Mock Collection' } });
   if (u.pathname === '/3/collection/9') return json({ name: 'Mock Collection', parts: [{ id: 102, title: 'Mock Movie 3', release_date: '2026-05-01', poster_path: null }, { id: 100, title: 'Mock Movie', release_date: '2024-05-01', poster_path: null }, { id: 101, title: 'Mock Movie 2', release_date: '2025-05-01', poster_path: null }] });
+  if (u.pathname === '/3/movie/100/credits') return json({ cast: [{ id: 500, name: 'Jane Actor' }], crew: [{ id: 501, name: 'Dan Director', job: 'Director' }] });
+  if (u.pathname === '/3/search/person') return json({ results: /dan/i.test(u.searchParams.get('query')) ? [{ id: 501, name: 'Dan Director', popularity: 5 }] : [{ id: 999, name: 'Jane Actor Impostor', popularity: 1 }, { id: 500, name: 'Jane Actor', popularity: 9 }] });
+  if (u.pathname === '/3/person/500') return json({ name: 'Jane Actor', profile_path: '/jane.jpg', known_for_department: 'Acting', birthday: '1980-02-03', biography: 'Jane acts.', combined_credits: {
+    cast: [{ media_type: 'movie', id: 100, title: 'Mock Movie', release_date: '2024-05-01', poster_path: '/p.jpg', character: 'Lead', vote_count: 900, popularity: 50, genre_ids: [28] },
+      { media_type: 'movie', id: 101, title: 'Mock Movie 2', release_date: '2025-05-01', poster_path: null, character: 'Cop', vote_count: 300, popularity: 20, genre_ids: [28] },
+      { media_type: 'tv', id: 200, name: 'Mock Show', first_air_date: '2022-01-01', poster_path: null, character: 'Mum', vote_count: 500, popularity: 30, genre_ids: [35] },
+      { media_type: 'tv', id: 300, name: 'Late Talk', first_air_date: '2023-01-01', character: 'Guest', vote_count: 90, popularity: 9, genre_ids: [10767] },
+      { media_type: 'movie', id: 103, title: 'A Documentary', release_date: '2021-01-01', character: 'Herself', vote_count: 40, popularity: 5, genre_ids: [99] },
+      { media_type: 'movie', id: 104, title: 'Undated', release_date: '', character: 'X', vote_count: 1, popularity: 1, genre_ids: [] }],
+    crew: [{ media_type: 'movie', id: 101, title: 'Mock Movie 2', release_date: '2025-05-01', job: 'Executive Producer', vote_count: 300, popularity: 20, genre_ids: [] }] } });
+  if (u.pathname === '/3/person/501') return json({ name: 'Dan Director', combined_credits: { cast: [], crew: [{ media_type: 'movie', id: 100, title: 'Mock Movie', release_date: '2024-05-01', job: 'Director', vote_count: 900, popularity: 50, genre_ids: [] }, { media_type: 'movie', id: 105, title: 'Dan Short', release_date: '2018-01-01', job: 'Screenplay', vote_count: 10, popularity: 2, genre_ids: [] }] } });
+  if ((m = /^\/3\/tv\/(\d+)\/external_ids$/.exec(u.pathname))) return json({ imdb_id: 'tt0000' + m[1] });
   if ((m = /^\/3\/movie\/(\d+)\/external_ids$/.exec(u.pathname))) return json({ imdb_id: 'tt0000' + m[1] });
   // Xtream Codes stand-in (user "u", password "p")
   if (u.pathname === '/player_api.php') {

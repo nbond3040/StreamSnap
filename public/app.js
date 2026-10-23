@@ -258,23 +258,23 @@ async function libraryView() {
 
 // ---------- people ----------
 /** "Cast: A, B, C" where every name opens that person's other work. */
-function credits(label, names) {
+function credits(label, names, fromId) {
   names = (Array.isArray(names) ? names : []).filter((n) => typeof n === 'string' && n.trim());
   if (!names.length) return null;
   const out = [h('span', { class: 'subtle' }, label + ': ')];
-  names.forEach((n, i) => { if (i) out.push(h('span', { class: 'subtle' }, ', ')); out.push(h('a', { class: 'person', href: '#/person/' + encodeURIComponent(n), title: `More from ${n}` }, n)); });
+  names.forEach((n, i) => { if (i) out.push(h('span', { class: 'subtle' }, ', ')); out.push(h('a', { class: 'person', href: '#/person/' + encodeURIComponent(n) + (fromId ? '/' + fromId : ''), title: `More from ${n}` }, n)); });
   return h('div', { class: 'credits' }, out);
 }
 
-async function personView(name) {
+async function personView(name, from) {
   view.replaceChildren(h('div', { class: 'backbar' }, h('button', { class: 'btn ghost sm', onclick: goBack }, '← Back')), h('h2', { class: 'sec' }, name), h('div', { class: 'subtle', style: 'margin-bottom:12px' }, 'Looking up their work…'), skeletons());
   let out;
-  try { out = await api('/person?name=' + encodeURIComponent(name)); }
-  catch (e) { return view.replaceChildren(h('h2', { class: 'sec' }, name), retryBox(e, () => personView(name))); }
+  try { out = await api('/person?name=' + encodeURIComponent(name) + (from ? '&from=' + from : '')); }
+  catch (e) { return view.replaceChildren(h('h2', { class: 'sec' }, name), retryBox(e, () => personView(name, from))); }
   let role = '';
   const body = h('div'), seg = h('div', { class: 'seg' });
   const roles = ['Director', 'Actor', 'Writer'].filter((r) => out.items.some((m) => m.roles.includes(r)));
-  const grid = (list) => h('div', { class: 'grid' }, list.map((x) => card(x)));
+  const grid = (list) => h('div', { class: 'grid' }, list.map((x) => { const c = card(x); if (x.character) c.querySelector('.t').append(h('small', {}, 'as ' + x.character)); return c; }));
   function render() {
     seg.replaceChildren(...(roles.length > 1 ? [['', 'All'], ...roles.map((r) => [r, r === 'Actor' ? 'Acting' : r === 'Director' ? 'Directing' : 'Writing'])] : []).map(([v, label]) =>
       h('button', { class: role === v ? 'on' : '', onclick: () => { role = v; render(); } }, label)));
@@ -288,7 +288,15 @@ async function personView(name) {
     if (!role && out.other.length) parts.push(h('h3', { class: 'grp' }, 'Other matches', h('span', { class: 'count' }, out.other.length)), h('p', { class: 'subtle' }, 'Titles that matched the name but whose credits couldn’t be checked.'), grid(out.other));
     body.replaceChildren(...parts);
   }
-  view.replaceChildren(h('div', { class: 'backbar' }, h('button', { class: 'btn ghost sm', onclick: goBack }, '← Back')), h('h2', { class: 'sec' }, name, h('span', { class: 'count' }, out.items.length)), h('div', { class: 'filters' }, seg), body);
+  const head = h('div', { class: 'phead' },
+    out.photo && h('img', { class: 'pphoto', src: out.photo, alt: '' }),
+    h('div', {}, h('h2', { class: 'sec', style: 'margin:0' }, out.name || name, h('span', { class: 'count' }, out.items.length)),
+      h('div', { class: 'subtle' }, [out.department, out.born && 'Born ' + out.born].filter(Boolean).join(' · ')),
+      out.bio && h('p', { class: 'pbio' }, out.bio)));
+  const notes = [];
+  if (out.needsKey) notes.push(h('div', { class: 'notice' }, 'This only shows the best-known credits. For complete filmographies add a free TMDB API key in ', h('a', { href: '#/settings' }, 'Settings'), '.'));
+  else if (out.notice) notes.push(h('div', { class: 'notice warn' }, 'Couldn’t load the full filmography (' + out.notice + '), showing the best-known credits instead.'));
+  view.replaceChildren(h('div', { class: 'backbar' }, h('button', { class: 'btn ghost sm', onclick: goBack }, '← Back')), head, ...notes, h('div', { class: 'filters' }, seg), body);
   render();
 }
 
@@ -449,7 +457,7 @@ async function detail(type, id) {
         h('div', { class: 'meta' }, meta.imdbRating && h('span', { class: 'star' }, '★ ' + meta.imdbRating), metaLine.map((c) => h('span', { class: 'dot' }, c))),
         h('div', { class: 'chips' }, (meta.genres || []).map((g) => h('span', { class: 'chip' }, g))),
         h('p', { class: 'desc' }, meta.description || ''),
-        credits('Directed by', meta.director), credits('Cast', (meta.cast || []).slice(0, 12)),
+        credits('Directed by', meta.director, meta.imdb_id || id), credits('Cast', (meta.cast || []).slice(0, 12), meta.imdb_id || id),
         h('div', { class: 'actions' }, playBtn, keepBtn, libBtn))));
 
   function ready(ctx) {
@@ -677,7 +685,7 @@ async function route() {
     else if (page === 'settings') await settings();
     else if (page === 'downloads') await offlineView();
     else if (page === 'calendar') await Calendar.view();
-    else if (page === 'person') await personView(decodeURIComponent(a));
+    else if (page === 'person') await personView(decodeURIComponent(a), b);
   } catch (e) { view.replaceChildren(showErr(e)); }
   window.scrollTo(0, restore);
 }

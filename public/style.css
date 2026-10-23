@@ -510,3 +510,6 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 .team-opt { display:flex; align-items:center; gap:8px; padding:5px 4px; border-radius:6px; cursor:pointer; font-size:14px; } .team-opt:hover { background:var(--s3); }
 
 .credits { margin:6px 0; line-height:1.7; } a.person { color:var(--fg2); text-decoration:none; border-bottom:1px dotted var(--dim); } a.person:hover { color:var(--accent2); border-bottom-color:var(--accent2); }
+
+.phead { display:flex; gap:18px; align-items:flex-start; margin:10px 0 14px; } .pphoto { width:92px; height:92px; border-radius:50%; object-fit:cover; flex:none; }
+.pbio { margin:8px 0 0; color:var(--fg2); max-width:80ch; line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }

@@ -286,13 +286,22 @@ function createServer(port) {
       if (last) meta.lastWatched = { videoId: last.meta.videoId, finished: last.dur > 0 && last.pos / last.dur > 0.9 };
       return meta;
     },
-    // Titles a person is credited on (director / actor / writer), from Cinemeta's own search + each title's credits.
+    // Everything a person is credited on. With a TMDB key it's their full filmography; without one (or if TMDB is down)
+    // it falls back to Cinemeta's search, checked against each title's credits, which only finds the best-known work.
     async 'GET /api/person'(req, q) {
-      const name = String(q.get('name') || '').trim();
+      const name = String(q.get('name') || '').trim(), from = q.get('from') || '';
       if (name.length < 2 || name.length > 80) throw new HttpError(400, 'bad name');
-      const key = people.norm(name), hit = personCache.get(key);
+      const tmdbKey = config.loadConfig().tmdbKey;
+      const key = `${people.norm(name)}|${from}|${tmdbKey ? 1 : 0}`, hit = personCache.get(key);
       if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.out;
-      const out = await people.find(name, { catalog: cinemeta.catalog, meta: cinemeta.meta });
+      let out, notice = '';
+      if (tmdbKey) {
+        try {
+          const f = await tmdb.filmography(name, tmdbKey, from);
+          if (f.items.length) out = { ...f, other: [], source: 'tmdb' };
+        } catch (e) { notice = e.message; }
+      }
+      if (!out) out = { ...(await people.find(name, { catalog: cinemeta.catalog, meta: cinemeta.meta })), source: 'cinemeta', needsKey: !tmdbKey, notice };
       if (out.items.length) { personCache.set(key, { at: Date.now(), out }); if (personCache.size > 100) personCache.delete(personCache.keys().next().value); }
       return out;
     },
