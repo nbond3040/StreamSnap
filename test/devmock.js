@@ -11,10 +11,10 @@ const self = `http://127.0.0.1:${port}`;
 const flaky = {};
 const BIG = Number(process.env.MOCK_CHANNELS || 0), BIGCATS = Number(process.env.MOCK_CATS || 400);
 const posters = (n) => ({ poster: '', background: '', description: `Mock description for ${n}.`, imdbRating: '8.1', releaseInfo: '2024', genres: ['Drama'] });
-const movie = { id: 'tt0000001', imdb_id: 'tt0000001', type: 'movie', name: 'Mock Movie', ...posters('movie'), genres: ['Action', 'Drama'], runtime: '30 s' };
+const movie = { id: 'tt0000001', imdb_id: 'tt0000001', type: 'movie', name: 'Mock Movie', cast: ['Jane Actor', 'Sam Support'], director: ['Dan Director'], writer: ['Wes Writer'], ...posters('movie'), genres: ['Action', 'Drama'], runtime: '30 s' };
 const videos = [];
 for (const [s, n] of [[1, 3], [2, 2]]) for (let e = 1; e <= n; e++) videos.push({ season: s, episode: e, name: `Episode ${s}.${e}`, released: new Date(Date.now() + ((s - 1) * 3 + e - 2) * 86400000).toISOString() });
-const series = { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Mock Series', ...posters('series'), genres: ['Comedy'], videos };
+const series = { id: 'tt0000002', imdb_id: 'tt0000002', type: 'series', name: 'Mock Series', cast: ['Jane Actor', 'Other Person'], director: [], ...posters('series'), genres: ['Comedy'], videos };
 
 const stream = (res, label, file, extra = '') => ({
   name: `[RD+] Torrentio\n${res}`,
@@ -31,6 +31,12 @@ http.createServer((req, res) => {
   const u = new URL(req.url, self);
   let m;
   if (/^\/catalog\/movie\/.*boom/.test(u.pathname)) { res.writeHead(504); return res.end(); } // simulate a Cinemeta gateway timeout
+  const who = /search=([^/.]+)/.exec(u.pathname);
+  if (who && /^\/catalog\/(movie|series)\//.test(u.pathname) && /actor|director/i.test(decodeURIComponent(who[1]))) { // a person search: real credits plus a title that only shares the words
+    const t = u.pathname.split('/')[2];
+    return json({ metas: t === 'movie' ? [{ ...movie, releaseInfo: '2024' }, { ...movie, id: 'tt9000001', imdb_id: 'tt9000001', name: 'The Actor Story', releaseInfo: '2019', cast: ['Someone Else'] }]
+      : [{ ...series, releaseInfo: '2022–' }] });
+  }
   if (/^\/catalog\/(movie|series)\//.test(u.pathname)) {
     const type = u.pathname.split('/')[2], skip = Number((/skip=(\d+)/.exec(u.pathname) || [])[1] || 0);
     if (type === 'series' && skip === 80 && (flaky.n = (flaky.n || 0) + 1) <= 3) { res.writeHead(504); return res.end(); } // a few gateway timeouts, then fine
@@ -86,7 +92,7 @@ http.createServer((req, res) => {
   if (u.pathname === '/live/u/p/115.ts') { res.writeHead(200, { 'content-type': 'video/mp2t' }); return; } // off air: connects, then never sends anything
   if (u.pathname === '/live/u/p/116.ts') { res.writeHead(404); return res.end(); }
   if (/^\/live\/u\/p\/\d+\.ts$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'video/mp2t' }); return fs.createReadStream(path.join(dir, 'live.ts')).pipe(res); }
-  if ((m = /^\/meta\/(movie|series)\/(tt9\d+)\.json$/.exec(u.pathname))) return json({ meta: { ...(m[1] === 'movie' ? movie : series), id: m[2], imdb_id: m[2], name: `Generated ${m[2]}` } });
+  if ((m = /^\/meta\/(movie|series)\/(tt9\d+)\.json$/.exec(u.pathname))) return json({ meta: { ...(m[1] === 'movie' ? movie : series), id: m[2], imdb_id: m[2], name: `Generated ${m[2]}`, ...(m[2] === 'tt9000001' ? { cast: ['Someone Else'], director: [] } : {}) } });
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
   if (u.pathname === '/meta/movie/tt0000003.json') return json({ meta: { ...movie, id: 'tt0000003', imdb_id: 'tt0000003', name: 'Only French' } });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });

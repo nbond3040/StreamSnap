@@ -25,6 +25,8 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const streamsByRef = new Map(); // ref -> parsed stream (so the browser never handles URLs/keys)
 const offline = require('./lib/offline');
 const nba = require('./lib/nba');
+const people = require('./lib/people');
+const personCache = new Map();   // name -> { at, out }
 const resolved = new Map();     // ref -> { url, at }
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -283,6 +285,16 @@ function createServer(port) {
       const last = Object.values(data.progress).filter((p) => p.meta && p.meta.id === meta.imdb_id && p.meta.videoId).sort((a, b) => b.at - a.at)[0];
       if (last) meta.lastWatched = { videoId: last.meta.videoId, finished: last.dur > 0 && last.pos / last.dur > 0.9 };
       return meta;
+    },
+    // Titles a person is credited on (director / actor / writer), from Cinemeta's own search + each title's credits.
+    async 'GET /api/person'(req, q) {
+      const name = String(q.get('name') || '').trim();
+      if (name.length < 2 || name.length > 80) throw new HttpError(400, 'bad name');
+      const key = people.norm(name), hit = personCache.get(key);
+      if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.out;
+      const out = await people.find(name, { catalog: cinemeta.catalog, meta: cinemeta.meta });
+      if (out.items.length) { personCache.set(key, { at: Date.now(), out }); if (personCache.size > 100) personCache.delete(personCache.keys().next().value); }
+      return out;
     },
     // Other films in the same franchise (needs a TMDB key); never an error page, just "nothing to show".
     async 'GET /api/collection'(req, q) {

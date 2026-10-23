@@ -256,6 +256,42 @@ async function libraryView() {
   applyBadges();
 }
 
+// ---------- people ----------
+/** "Cast: A, B, C" where every name opens that person's other work. */
+function credits(label, names) {
+  names = (Array.isArray(names) ? names : []).filter((n) => typeof n === 'string' && n.trim());
+  if (!names.length) return null;
+  const out = [h('span', { class: 'subtle' }, label + ': ')];
+  names.forEach((n, i) => { if (i) out.push(h('span', { class: 'subtle' }, ', ')); out.push(h('a', { class: 'person', href: '#/person/' + encodeURIComponent(n), title: `More from ${n}` }, n)); });
+  return h('div', { class: 'credits' }, out);
+}
+
+async function personView(name) {
+  view.replaceChildren(h('div', { class: 'backbar' }, h('button', { class: 'btn ghost sm', onclick: goBack }, '← Back')), h('h2', { class: 'sec' }, name), h('div', { class: 'subtle', style: 'margin-bottom:12px' }, 'Looking up their work…'), skeletons());
+  let out;
+  try { out = await api('/person?name=' + encodeURIComponent(name)); }
+  catch (e) { return view.replaceChildren(h('h2', { class: 'sec' }, name), retryBox(e, () => personView(name))); }
+  let role = '';
+  const body = h('div'), seg = h('div', { class: 'seg' });
+  const roles = ['Director', 'Actor', 'Writer'].filter((r) => out.items.some((m) => m.roles.includes(r)));
+  const grid = (list) => h('div', { class: 'grid' }, list.map((x) => card(x)));
+  function render() {
+    seg.replaceChildren(...(roles.length > 1 ? [['', 'All'], ...roles.map((r) => [r, r === 'Actor' ? 'Acting' : r === 'Director' ? 'Directing' : 'Writing'])] : []).map(([v, label]) =>
+      h('button', { class: role === v ? 'on' : '', onclick: () => { role = v; render(); } }, label)));
+    const items = out.items.filter((m) => !role || m.roles.includes(role));
+    const parts = [];
+    for (const [t, title] of [['movie', 'Movies'], ['series', 'Series']]) {
+      const list = items.filter((m) => m.type === t);
+      if (list.length) parts.push(h('h3', { class: 'grp' }, title, h('span', { class: 'count' }, list.length)), grid(list));
+    }
+    if (!parts.length) parts.push(h('div', { class: 'empty' }, 'No credits found for this person.'));
+    if (!role && out.other.length) parts.push(h('h3', { class: 'grp' }, 'Other matches', h('span', { class: 'count' }, out.other.length)), h('p', { class: 'subtle' }, 'Titles that matched the name but whose credits couldn’t be checked.'), grid(out.other));
+    body.replaceChildren(...parts);
+  }
+  view.replaceChildren(h('div', { class: 'backbar' }, h('button', { class: 'btn ghost sm', onclick: goBack }, '← Back')), h('h2', { class: 'sec' }, name, h('span', { class: 'count' }, out.items.length)), h('div', { class: 'filters' }, seg), body);
+  render();
+}
+
 // ---------- detail ----------
 /** Fetch streams + captions for one movie/episode and bundle everything the player needs. */
 async function buildContext(base, vid, ep, episodes) {
@@ -413,7 +449,7 @@ async function detail(type, id) {
         h('div', { class: 'meta' }, meta.imdbRating && h('span', { class: 'star' }, '★ ' + meta.imdbRating), metaLine.map((c) => h('span', { class: 'dot' }, c))),
         h('div', { class: 'chips' }, (meta.genres || []).map((g) => h('span', { class: 'chip' }, g))),
         h('p', { class: 'desc' }, meta.description || ''),
-        meta.cast && h('div', { class: 'subtle' }, 'Cast: ' + meta.cast.slice(0, 6).join(', ')),
+        credits('Directed by', meta.director), credits('Cast', (meta.cast || []).slice(0, 12)),
         h('div', { class: 'actions' }, playBtn, keepBtn, libBtn))));
 
   function ready(ctx) {
@@ -641,6 +677,7 @@ async function route() {
     else if (page === 'settings') await settings();
     else if (page === 'downloads') await offlineView();
     else if (page === 'calendar') await Calendar.view();
+    else if (page === 'person') await personView(decodeURIComponent(a));
   } catch (e) { view.replaceChildren(showErr(e)); }
   window.scrollTo(0, restore);
 }

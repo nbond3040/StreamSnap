@@ -29,6 +29,7 @@ flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.gi
 The Flatpak builds its own ffmpeg; for the RPM and AppImage install `ffmpeg` (Fedora: RPM Fusion's `ffmpeg`) for format conversion, Live TV and DVR.
 
 ## Features
+- Cast and director names on a title's page are links: click one to see everything else they're credited on (movies and series, filterable by directing / acting / writing)
 - Calendar: episodes of series in your library plus NBA games (schedule and live scores from ESPN). Click a game for tip-off time, score and the best channel from your Live TV provider to watch it on (highest quality first), with one-click recording
 - Downloads for offline viewing (button next to each stream) and a Downloads page; downloads pause while anything is playing so they can never cause buffering
 - DVR: record a live channel now (30 min / 1 h / 2 h / this programme) or schedule a programme from the channel guide; recordings play from the Downloads page

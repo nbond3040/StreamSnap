@@ -508,3 +508,5 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 .team-actions { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--line); }
 .team-list { display:grid; grid-template-columns:1fr 1fr; gap:2px 14px; max-height:50vh; overflow:auto; }
 .team-opt { display:flex; align-items:center; gap:8px; padding:5px 4px; border-radius:6px; cursor:pointer; font-size:14px; } .team-opt:hover { background:var(--s3); }
+
+.credits { margin:6px 0; line-height:1.7; } a.person { color:var(--fg2); text-decoration:none; border-bottom:1px dotted var(--dim); } a.person:hover { color:var(--accent2); border-bottom-color:var(--accent2); }
