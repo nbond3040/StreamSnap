@@ -108,6 +108,7 @@ http.createServer((req, res) => {
   if (u.pathname === '/meta/movie/tt0000001.json') return json({ meta: movie });
   if (u.pathname === '/meta/movie/tt0000003.json') return json({ meta: { ...movie, id: 'tt0000003', imdb_id: 'tt0000003', name: 'Only French' } });
   if (u.pathname === '/meta/series/tt0000002.json') return json({ meta: series });
+  if (/\/stream\/movie\/tt0000008/.test(u.pathname)) return json({ streams: [stream('1080p', 'FLAKY', 'a.webm'), stream('720p', 'PLACEHOLDER', 'a.webm'), stream('480p', 'STALE', 'a.webm')] });   // resolve failure modes
   if (/\/stream\/movie\/tt0000003/.test(u.pathname)) return json({ streams: [stream('1080p', 'FRA1', 'a.webm', '\n🇫🇷'), stream('720p', 'FRA2', 'a.webm', '\n🇫🇷')] });
   { // episodes with special files: chapters (S1E3) and a black "credits" ending (S2E1)
     const sp = /\/stream\/series\/(tt0000002:\d:\d)/.exec(u.pathname);
@@ -119,8 +120,15 @@ http.createServer((req, res) => {
   }
   if (u.pathname.startsWith('/subtitles/')) return json({ subtitles: [{ id: '1', lang: 'eng', url: `${self}/sub.srt` }] });
   if (u.pathname === '/sub.srt') { res.writeHead(200); return res.end('1\n00:00:01,000 --> 00:00:04,000\nHello captions\n\n2\n00:00:10,000 --> 00:00:12,000\nSecond line\n'); }
+  if ((m = /^\/resolve\/realdebrid\/KEY\/(\w+)\/.*\/([^/]+)$/.exec(u.pathname))) {
+    flaky.resolves = flaky.resolves || {}; const n = flaky.resolves[m[1]] = (flaky.resolves[m[1]] || 0) + 1;
+    if (m[1] === 'FLAKY' && n === 1) { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<html>busy, try again</html>'); }   // the resolver hiccups once
+    if (m[1] === 'PLACEHOLDER') { res.writeHead(302, { location: '/videos/failed_access_v2.mp4' }); return res.end(); }                   // Real-Debrid refused: Torrentio's "failed" placeholder
+    res.writeHead(302, { location: `/video/${m[2]}${m[1] === 'STALE' && n === 1 ? '?expired' : ''}` }); return res.end();                // STALE: the first link we hand out is already dead
+  }
   if ((m = /^\/resolve\/.*\/([^/]+)$/.exec(u.pathname))) { res.writeHead(302, { location: `/video/${m[1]}` }); return res.end(); }
   if ((m = /^\/video\/([\w.]+)$/.exec(u.pathname))) {
+    if (u.searchParams.has('expired')) { res.writeHead(403); return res.end('expired'); }
     const file = path.join(dir, m[1]);
     if (!fs.existsSync(file)) { res.writeHead(404); return res.end(); }
     const size = fs.statSync(file).size, type = file.endsWith('.webm') ? 'video/webm' : 'video/x-matroska';

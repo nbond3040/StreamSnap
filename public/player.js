@@ -89,14 +89,23 @@ const Player = (() => {
   video.addEventListener('playing', () => { BufferInfo.stop(); localStrikes = 0; status(null); });
   video.addEventListener('waiting', () => { status('spin', 'Buffering…'); watchBuffering(); });
   video.addEventListener('canplay', () => status(null));
-  video.addEventListener('error', () => {
+  let retriedFresh = null;   // stream ref we've already retried with a freshly resolved link
+  video.addEventListener('error', async () => {
     if (!stream || !video.getAttribute('src')) return;
+    const my = token, bad = stream;
     if (mode === 'direct' && !fellBack && info.ffmpeg !== false && (window.APPINFO || {}).players?.ffmpeg) {
       fellBack = true; mode = 'compat'; setSource(cur()); video.play().catch(() => {}); return;
     }
-    const hints = [h('div', { class: 'subtle', style: 'margin:8px 0 14px' }, (APPINFO.players.ffmpeg ? 'Try another quality from the menu.' : 'Install ffmpeg for automatic format conversion, or try another quality.'))];
-    if (APPINFO.players.mpv || APPINFO.players.vlc) hints.push(h('button', { class: 'btn', onclick: openExternal }, 'Open in mpv / VLC'));
-    status('err', 'This stream can’t be played in the app window.', h('div', {}, hints));
+    // Find out why before giving up: a stale link is fixed by asking the provider again, and anything else gets a real reason.
+    const check = await api('/stream-check?ref=' + bad.ref).catch(() => null);
+    if (my !== token || stream !== bad) return;
+    if (check && check.ok && retriedFresh !== bad.ref) { retriedFresh = bad.ref; fellBack = false; setSource(cur()); video.play().catch(() => {}); return; }
+    const actions = [h('button', { class: 'btn', onclick: () => { retriedFresh = null; load(bad, cur(), true); } }, 'Try again')];
+    const lower = ctx.picks[ctx.picks.findIndex((x) => x === pick) + 1];
+    if (lower) actions.push(h('button', { class: 'btn ghost', onclick: () => switchQuality(lower.resolution) }, `Try ${resLabel(lower.resolution)}`));
+    if (APPINFO.players.mpv || APPINFO.players.vlc) actions.push(h('button', { class: 'btn ghost', onclick: openExternal }, 'Open in mpv / VLC'));
+    const why = check && !check.ok ? check.reason : (APPINFO.players.ffmpeg ? 'The file loads but its format can’t be played. Try another quality.' : 'Install ffmpeg for automatic format conversion, or try another quality.');
+    status('err', 'This stream can’t be played.', h('div', {}, h('div', { class: 'subtle', style: 'margin:8px 0 14px;max-width:46ch' }, why), h('div', { class: 'row', style: 'justify-content:center' }, actions)));
   });
   video.addEventListener('ended', () => { markProgress(true); autoplayCountdown(); });
   // When an episode finishes and Autoplay next is on, count down on the Next button, then start it. Any other action cancels.

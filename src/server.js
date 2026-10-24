@@ -31,8 +31,8 @@ const resolved = new Map();     // ref -> { url, at }
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
-async function resolveFinal(ref) {
-  const hit = resolved.get(ref);
+async function resolveFinal(ref, { fresh = false } = {}) {
+  const hit = fresh ? null : resolved.get(ref);
   if (hit && Date.now() - hit.at < 15 * 60 * 1000) return hit.url;
   const s = streamsByRef.get(ref);
   if (!s) throw new HttpError(404, 'Stream expired, reload the stream list.');
@@ -41,14 +41,53 @@ async function resolveFinal(ref) {
   return url;
 }
 
-async function resolveDirect(url) {
-  try { // Torrentio's /resolve/ link 302s to the Real-Debrid direct link
-    const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30000) });
-    const loc = r.headers.get('location');
-    if (r.status >= 300 && r.status < 400 && loc) url = new URL(loc, url).toString();
-    r.body && r.body.cancel().catch(() => {});
-  } catch { /* fall back to the original URL */ }
+// Torrentio answers a resolve request with a redirect to the Real-Debrid file, or, when something is wrong, with a redirect to one
+// of its own placeholder videos (or an error page). Treating those as the stream is what makes a title "load" and then never play.
+const PLACEHOLDER_REASONS = [
+  [/download(ing)?/i, 'Real-Debrid is still downloading this file. Try again in a minute.'],
+  [/access/i, 'Real-Debrid refused access. Check your API key and account status in Settings.'],
+  [/rar|archive/i, 'This release is packed in an archive that can’t be streamed. Pick another one.'],
+  [/no_download|no_links|unavailable/i, 'Real-Debrid has no download link for this file. Pick another release.'],
+  [/ban|limit|traffic/i, 'Real-Debrid is limiting this account right now (too many requests or traffic). Wait a bit and try again.'],
+];
+const reasonFor = (name) => (PLACEHOLDER_REASONS.find(([re]) => re.test(name)) || [0, `Real-Debrid couldn’t provide this file (${name}). Pick another release.`])[1];
+
+/** The direct URL for a stream, re-checked when it was resolved a while ago (Real-Debrid links expire; a dead one fails silently). */
+async function checkedUrl(ref) {
+  const hit = resolved.get(ref);
+  const url = await resolveFinal(ref);
+  if (hit && Date.now() - hit.at > 60 * 1000) {
+    try {
+      const r = await fetch(url, { headers: { range: 'bytes=0-0' }, signal: AbortSignal.timeout(10000) });
+      r.body && r.body.cancel().catch(() => {});
+      if (r.status >= 400) { resolved.delete(ref); return resolveFinal(ref, { fresh: true }); }
+    } catch { /* unreachable now: let the caller's own request report it */ }
+  }
   return url;
+}
+
+async function resolveDirect(url, attempts = 3) {
+  let last = 'Real-Debrid didn’t answer';
+  for (let i = 0; i < attempts; i++) {
+    if (i) await sleep(500 * 2 ** (i - 1));
+    try { // Torrentio's /resolve/ link 302s to the Real-Debrid direct link
+      const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30000) });
+      const loc = r.headers.get('location');
+      const type = r.headers.get('content-type') || '';
+      r.body && r.body.cancel().catch(() => {});
+      if (r.status >= 300 && r.status < 400 && loc) {
+        const to = new URL(loc, url);
+        if (/^\/videos\//.test(to.pathname) && to.host === new URL(url).host) throw Object.assign(new Error(reasonFor(to.pathname.split('/').pop())), { final: true });
+        return to.toString();
+      }
+      if (r.ok && /^(video|application\/octet-stream)/i.test(type)) return url;           // served directly, no redirect
+      last = r.status === 429 ? 'Real-Debrid / Torrentio is rate limiting requests. Wait a moment and try again.' : `The stream service answered ${r.status} instead of a video.`;
+    } catch (e) {
+      if (e.final) throw new HttpError(502, e.message);
+      last = `Couldn’t reach the stream service (${e.name === 'TimeoutError' ? 'timed out' : e.message}).`;
+    }
+  }
+  throw new HttpError(502, last);
 }
 
 function redacted(cfg) {
@@ -220,7 +259,7 @@ async function rawProbe(ref) {
 
 /** Remux (or transcode when needed) to fragmented MP4 so any stream plays in the app window. */
 async function compatStream(req, res, ref, t, delay = 0, maxH = 1080) {
-  const url = await resolveFinal(ref);
+  const url = await checkedUrl(ref);
   const info = await probe(ref);
   const copyVideo = (info.video === 'h264' && info.eightBit !== false) || info.video === 'vp9' || info.video === 'av1';
   const copyAudio = info.audio === 'opus'; // Opus-in-MP4 decodes in every Chromium build, AAC needs proprietary codecs
@@ -255,7 +294,10 @@ function recordProgress(key, pos, dur, meta) {
   config.saveData(data);
 }
 
+let guarded = false;
 function createServer(port) {
+  // A failure in one request (a dead link, a dropped connection) must never take the whole app down.
+  if (!guarded) { guarded = true; process.on('unhandledRejection', (e) => console.error('unhandled:', e && e.message ? e.message : e)); }
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const routes = {
     async 'GET /api/config'() { return redacted(config.loadConfig()); },
@@ -425,6 +467,21 @@ function createServer(port) {
       if (!/^[0-9a-f]{20}$/.test(ref || '')) throw new HttpError(400, 'bad ref');
       return probe(ref);
     },
+    // Why won't this stream play? Re-resolves it from scratch and asks the provider for its first bytes.
+    async 'GET /api/stream-check'(req, q) {
+      const ref = q.get('ref');
+      if (!/^[0-9a-f]{20}$/.test(ref || '')) throw new HttpError(400, 'bad ref');
+      resolved.delete(ref);
+      try {
+        const url = await resolveFinal(ref, { fresh: true });
+        const r = await fetch(url, { headers: { range: 'bytes=0-1' }, signal: AbortSignal.timeout(20000) });
+        r.body && r.body.cancel().catch(() => {});
+        if (r.status >= 400) return { ok: false, reason: `The provider answered ${r.status} for this file. It may have been removed; pick another release.` };
+        const type = r.headers.get('content-type') || '';
+        if (/^(text\/html|application\/json)/i.test(type)) return { ok: false, reason: 'The provider returned a web page instead of the video. Pick another release.' };
+        return { ok: true };
+      } catch (e) { return { ok: false, reason: e.message }; }
+    },
     // Hand a stream to an external player (mpv / VLC).
     async 'POST /api/play'(req) {
       const { ref, key, title, meta, subs = [] } = await readBody(req);
@@ -432,7 +489,7 @@ function createServer(port) {
       let choice = player.pickPlayer(cfg.player);
       if (choice === 'browser') choice = player.pickPlayer('auto');
       if (choice === 'browser') throw new HttpError(400, 'Neither mpv nor VLC is installed.');
-      const url = await resolveFinal(ref);
+      const url = await checkedUrl(ref);
       const files = [];
       for (const r of subs) { try { files.push(await subtitles.fetchToFile(r)); } catch { /* subtitle is optional */ } }
       const { pos } = resumePoint(config.loadData().progress[key]);
@@ -608,14 +665,14 @@ function createServer(port) {
         if (!/application\/json/.test(req.headers['content-type'] || '')) throw new HttpError(415, 'JSON only');
       }
       let m;
-      if ((m = /^\/api\/stream\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return proxyStream(req, res, m[1]);
+      if ((m = /^\/api\/stream\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return await proxyStream(req, res, m[1]);
       if ((m = /^\/api\/file\/([0-9a-f]{16})$/.exec(url.pathname)) && req.method === 'GET') return offline.serveFile(req, res, m[1]);
       if ((m = /^\/api\/live\/stream\/(\d+)$/.exec(url.pathname)) && req.method === 'GET') {
         const cfg = config.loadConfig();
         if (!cfg.xtreamUrl || !player.available().ffmpeg) throw new HttpError(400, player.available().ffmpeg ? 'Live TV isn\'t set up.' : 'Live TV needs ffmpeg (sudo dnf/apt install ffmpeg).');
-        return live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1], parseInt(url.searchParams.get('a'), 10) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
+        return await live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1], parseInt(url.searchParams.get('a'), 10) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
       }
-      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
+      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return await compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
       if ((m = /^\/api\/sub\/([0-9a-f]{20})\.vtt$/.exec(url.pathname)) && req.method === 'GET') {
         const vtt = await subtitles.fetchVtt(m[1]);
         res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8' });
@@ -657,12 +714,20 @@ function serveStatic(pathname, res) {
 }
 
 async function proxyStream(req, res, ref) {
-  const url = await resolveFinal(ref);
+  let url = await resolveFinal(ref);
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   const headers = {};
   if (req.headers.range) headers.range = req.headers.range;
-  const up = await fetch(url, { headers, signal: ac.signal });
+  const bad = (r) => r.status >= 400 || /^(text\/html|application\/json)/i.test(r.headers.get('content-type') || '');
+  let up = await fetch(url, { headers, signal: ac.signal });
+  if (bad(up)) {   // the link we remembered has gone stale (or never was one): ask for a fresh one once before giving up
+    up.body && up.body.cancel().catch(() => {});
+    resolved.delete(ref);
+    url = await resolveFinal(ref, { fresh: true });
+    up = await fetch(url, { headers, signal: ac.signal });
+    if (bad(up)) { up.body && up.body.cancel().catch(() => {}); resolved.delete(ref); throw new HttpError(502, `The provider answered ${up.status} for this file.`); }
+  }
   const out = {};
   for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
     const v = up.headers.get(h); if (v) out[h] = v;
