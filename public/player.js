@@ -146,6 +146,15 @@ const Player = (() => {
     const lower = ctx.picks[ctx.picks.findIndex((x) => x === pick) + 1];
     showWarn(`Playback keeps ${reason === 'dropped' ? 'dropping frames' : 'stalling'} at ${resLabel(pick.resolution)}; your computer may be struggling with it.`,
       lower && h('button', { class: 'btn sm', onclick: () => { warn.hidden = true; switchQuality(lower.resolution); } }, `Switch to ${resLabel(lower.resolution)}`));
+  }, onDrift: (ms, n) => {
+    // the picture is lagging the clock (typically right after a skip): flush the decoder, then restart the stream here, then suggest a lighter quality
+    if (root.hidden || !ctx || !stream || video.paused) return;
+    if (n === 1) { const t = video.currentTime; video.currentTime = Math.max(0, t - 0.05); return; }
+    if (n === 2) { toast('Re-syncing picture and sound…'); load(stream, cur(), true); return; }
+    const lower = ctx.picks[ctx.picks.findIndex((x) => x === pick) + 1];
+    showWarn(`The picture keeps falling ${Math.round(ms)} ms behind the sound at ${resLabel(pick.resolution)}; your computer may be struggling with it.`,
+      h('button', { class: 'btn sm', onclick: () => { warn.hidden = true; load(stream, cur(), true); } }, 'Re-sync'),
+      lower && h('button', { class: 'btn sm', onclick: () => { warn.hidden = true; switchQuality(lower.resolution); } }, `Switch to ${resLabel(lower.resolution)}`));
   } });
 
   // ---------- controls ----------
@@ -230,6 +239,7 @@ const Player = (() => {
       h('div', { class: 'sync' }, h('span', {}, 'Audio delay'), h('span', { class: 'st' },
         h('button', { class: 'pbtn', title: 'Audio earlier', onclick: () => nudge(-100) }, '−'), out,
         h('button', { class: 'pbtn', title: 'Audio later', onclick: () => nudge(100) }, '+'))),
+      h('button', { class: 'resync', onclick: () => { $('#pQMenu').hidden = true; toast('Re-syncing picture and sound…'); load(stream, cur(), video.paused ? false : true); } }, h('span', {}, 'Re-sync picture and sound'), h('small', {}, 'Y')),
       h('div', { class: 'info', id: 'pInfo' }, ''));
     updateQuality();
   }
@@ -433,6 +443,7 @@ const Player = (() => {
     else if (k === 'f') fullscreen();
     else if (k === 'm') video.muted = !video.muted;
     else if (k === 'c') cycleCaptions();
+    else if (k === 'y') { toast('Re-syncing picture and sound…'); load(stream, cur(), !video.paused); }
     else if (k === 'e' && ctx.series) $('#pSide').hidden ? openSide() : closeSide();
     else if (k === 'escape') { if (!document.fullscreenElement) close(); }
   });

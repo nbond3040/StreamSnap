@@ -29,6 +29,7 @@ flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.gi
 The Flatpak builds its own ffmpeg; for the RPM and AppImage install `ffmpeg` (Fedora: RPM Fusion's `ffmpeg`) for format conversion, Live TV and DVR.
 
 ## Features
+- Automatic re-sync: after every skip (and every few seconds) the player compares each displayed frame with the playback clock; if the picture lags it flushes the decoder, then restarts the stream at the same spot, then suggests a lighter quality. `Y` (or the quality menu) re-syncs on demand
 - Controller support (PS5 DualSense or any standard gamepad, wired or Bluetooth): d-pad/stick to navigate, ✕ select, ○ back, △ play, □ search, L1/R1 tabs; full player and Live TV controls; an on-screen keyboard opens when you press ✕ on a text field. Press any button once after launch so the window sees the controller
 - Cast and director names on a title's page are links: click one to see everything else they're credited on (movies and series, filterable by directing / acting / writing). With a TMDB key in Settings this is their complete filmography with photo and bio; without one it falls back to Cinemeta's best-known credits
 - Calendar: episodes of series in your library plus NBA games (schedule and live scores from ESPN). Click a game for tip-off time, score and the best channel from your Live TV provider to watch it on (highest quality first), with one-click recording

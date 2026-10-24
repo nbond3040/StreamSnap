@@ -500,6 +500,13 @@ const Live = (() => {
       playlist.length > 1 && h('button', { class: 'btn ghost sm', onclick: () => { warn.hidden = true; zap(1); } }, 'Next channel'),
       h('button', { class: 'btn ghost sm', onclick: () => (warn.hidden = true) }, 'Dismiss'));
     warn.hidden = false;
+  }, onDrift: (ms, n) => {
+    if ($('#livePlayer').hidden || !current || video.paused) return;
+    if (n === 1) { toast('Re-syncing picture and sound…'); tune(true, current); return; }
+    warn.replaceChildren(h('span', {}, `The picture keeps falling ${Math.round(ms)} ms behind the sound; your computer may be struggling with it.`),
+      h('button', { class: 'btn sm', onclick: () => { warn.hidden = true; refresh(); } }, 'Refresh'),
+      h('button', { class: 'btn ghost sm', onclick: () => (warn.hidden = true) }, 'Dismiss'));
+    warn.hidden = false;
   } });
   /** Say who is holding the stream up, and lower the quality ourselves if the cause is this computer. */
   function bufferNote(text) {
