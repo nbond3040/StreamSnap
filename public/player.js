@@ -46,21 +46,50 @@ const Player = (() => {
     duration = info.duration || 0;
     segs = info.segments || {};
     mode = info.mode === 'compat' || (audioDelay !== 0 && info.ffmpeg) ? 'compat' : 'direct';
-    setSource(at);
-    if (autoplay) video.play().catch(() => {});
+    setSource(at, autoplay);
     updateQuality();
   }
 
-  function setSource(at) {
+  let srcSeq = 0, pendingSeek = 0;
+  /**
+   * Point the video at the stream, starting at `at`. A converted stream is not seekable in the browser (it has no length or index),
+   * so every jump re-opens it. One that copies the video can only begin on a keyframe, up to several seconds before `at`: ask where it
+   * will really begin, start it there (picture and sound together, clock correct), then play through the lead-in at high speed
+   * (muted by the browser at that speed) so it arrives at `at` within a moment.
+   */
+  async function setSource(at, play) {
     at = Math.max(0, at || 0);
-    if (mode === 'compat') { offset = at; video.src = `/api/compat/${stream.ref}?t=${at}&a=${audioDelay / 1000}` + (maxH < 1080 ? `&q=${maxH}` : ''); }
-    else {
+    const seq = ++srcSeq;
+    pendingSeek = 0; video.defaultPlaybackRate = 1;
+    status('spin', mode === 'compat' ? 'Preparing stream (compatibility mode)…' : 'Buffering…');
+    if (mode === 'compat') {
+      let start = at;
+      if (info.copyVideo && at > 1) {
+        const k = await api(`/keyframe?ref=${stream.ref}&t=${at}`).catch(() => null);
+        if (seq !== srcSeq) return;
+        if (k && Number.isFinite(k.start)) start = k.start;
+      }
+      offset = start;
+      if (play && at - start > 0.7 && at - start < 30) { pendingSeek = at - start; video.defaultPlaybackRate = 8; watchLeadIn(); }
+      video.src = `/api/compat/${stream.ref}?t=${start}&a=${audioDelay / 1000}` + (maxH < 1080 ? `&q=${maxH}` : '');
+    } else {
       offset = 0; video.src = `/api/stream/${stream.ref}`;
       video.addEventListener('loadedmetadata', () => { if (at) video.currentTime = at; }, { once: true });
     }
-    status('spin', mode === 'compat' ? 'Preparing stream (compatibility mode)…' : 'Buffering…');
     shiftCues();
+    if (play) video.play().catch(() => {});
   }
+  function finishLeadIn() {
+    if (!pendingSeek) return;
+    if (video.currentTime >= pendingSeek - 0.05 || video.ended) { pendingSeek = 0; video.defaultPlaybackRate = 1; video.playbackRate = 1; }
+  }
+  video.addEventListener('timeupdate', finishLeadIn);
+  function watchLeadIn() {   // checked on every displayed frame, so the fast part stops within a fraction of a second of the target
+    if (!video.requestVideoFrameCallback) return;
+    const tick = () => { finishLeadIn(); if (pendingSeek) video.requestVideoFrameCallback(tick); };
+    video.requestVideoFrameCallback(tick);
+  }
+  video.addEventListener('pause', () => { if (pendingSeek && video.readyState >= 1) { pendingSeek = 0; video.defaultPlaybackRate = 1; video.playbackRate = 1; } });
 
   function status(kind, msg, extra) {
     const el = $('#pStatus');
@@ -83,7 +112,7 @@ const Player = (() => {
     else if (r.verdict === 'local' && mode === 'compat' && ++localStrikes >= 2 && maxH > 480) {
       maxH = maxH > 720 ? 720 : 480; localStrikes = 0;
       toast(`Lowered the converted quality to ${maxH}p because this computer couldn’t keep up.`);
-      setSource(cur()); video.play().catch(() => {});
+      setSource(cur(), true);
     } else if (r.verdict === 'local') bufferNote(r.text);
   });
   video.addEventListener('playing', () => { BufferInfo.stop(); localStrikes = 0; status(null); });
@@ -94,12 +123,12 @@ const Player = (() => {
     if (!stream || !video.getAttribute('src')) return;
     const my = token, bad = stream;
     if (mode === 'direct' && !fellBack && info.ffmpeg !== false && (window.APPINFO || {}).players?.ffmpeg) {
-      fellBack = true; mode = 'compat'; setSource(cur()); video.play().catch(() => {}); return;
+      fellBack = true; mode = 'compat'; setSource(cur(), true); return;
     }
     // Find out why before giving up: a stale link is fixed by asking the provider again, and anything else gets a real reason.
     const check = await api('/stream-check?ref=' + bad.ref).catch(() => null);
     if (my !== token || stream !== bad) return;
-    if (check && check.ok && retriedFresh !== bad.ref) { retriedFresh = bad.ref; fellBack = false; setSource(cur()); video.play().catch(() => {}); return; }
+    if (check && check.ok && retriedFresh !== bad.ref) { retriedFresh = bad.ref; fellBack = false; setSource(cur(), true); return; }
     const actions = [h('button', { class: 'btn', onclick: () => { retriedFresh = null; load(bad, cur(), true); } }, 'Try again')];
     const lower = ctx.picks[ctx.picks.findIndex((x) => x === pick) + 1];
     if (lower) actions.push(h('button', { class: 'btn ghost', onclick: () => switchQuality(lower.resolution) }, `Try ${resLabel(lower.resolution)}`));
@@ -129,7 +158,7 @@ const Player = (() => {
   setInterval(() => {
     if (root.hidden || video.paused || video.muted || video.currentTime < 3 || mode === 'compat' || fellBack) return;
     if (video.webkitAudioDecodedByteCount === 0) {
-      if ((window.APPINFO || {}).players?.ffmpeg) { fellBack = true; mode = 'compat'; toast('Converting audio for playback…'); setSource(cur()); video.play().catch(() => {}); }
+      if ((window.APPINFO || {}).players?.ffmpeg) { fellBack = true; mode = 'compat'; toast('Converting audio for playback…'); setSource(cur(), true); }
       else if (!Player.warned) { Player.warned = true; status('err', 'This stream’s audio format isn’t supported by the app window.', h('div', { class: 'subtle', style: 'margin-top:8px' }, 'Install ffmpeg (sudo apt install ffmpeg) to fix this automatically, or pick another quality.')); }
     }
   }, 1500);
@@ -161,11 +190,8 @@ const Player = (() => {
   function toggle() { video.paused ? video.play().catch(() => {}) : video.pause(); }
   function seekTo(t) {
     t = Math.min(Math.max(0, t), Math.max(0, total() - 1));
-    if (mode === 'compat') {
-      const rel = t - offset, b = video.buffered;
-      if (rel >= 0 && b.length && rel < b.end(b.length - 1) - 1) video.currentTime = rel;
-      else { setSource(t); video.play().catch(() => {}); }
-    } else video.currentTime = t;
+    if (mode === 'compat') setSource(t, true);          // a converted stream can't be seeked inside the browser: re-open it there
+    else video.currentTime = t;
   }
   video.addEventListener('click', toggle);
   video.addEventListener('dblclick', fullscreen);
@@ -248,8 +274,7 @@ const Player = (() => {
     if (!stream) return;
     if (!(window.APPINFO || {}).players?.ffmpeg) return toast('Install ffmpeg to adjust audio sync');
     const wasPaused = video.paused, t = cur();
-    mode = 'compat'; setSource(t); updateQuality();
-    if (!wasPaused) video.play().catch(() => {});
+    mode = 'compat'; setSource(t, !wasPaused); updateQuality();
   }
   function updateQuality() {
     const i = $('#pInfo');

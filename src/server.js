@@ -229,7 +229,7 @@ async function probe(ref) {
   const videoOk = !raw.video || (SAFE_VIDEO.has(raw.video) && (raw.video !== 'h264' || raw.eightBit));
   const audioOk = !track || SAFE_AUDIO.has(track.codec);
   const needsConvert = !videoOk || !audioOk || idx > 0;
-  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', mode: raw.ffmpeg && (needsConvert || (streamsByRef.get(ref) || {}).forceCompat) ? 'compat' : 'direct', segments: segments.fromChapters(raw.chapters, raw.duration) };
+  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', copyVideo: copiesVideo(raw), mode: raw.ffmpeg && (needsConvert || (streamsByRef.get(ref) || {}).forceCompat) ? 'compat' : 'direct', segments: segments.fromChapters(raw.chapters, raw.duration) };
 }
 
 /** Index of the audio track in the user's language (first track if none is tagged). */
@@ -257,14 +257,18 @@ async function rawProbe(ref) {
   return info;
 }
 
-/** Remux (or transcode when needed) to fragmented MP4 so any stream plays in the app window. */
-async function compatStream(req, res, ref, t, delay = 0, maxH = 1080) {
-  const url = await checkedUrl(ref);
-  const info = await probe(ref);
-  const copyVideo = (info.video === 'h264' && info.eightBit !== false) || info.video === 'vp9' || info.video === 'av1';
+const copiesVideo = (info) => (info.video === 'h264' && info.eightBit !== false) || info.video === 'vp9' || info.video === 'av1';
+
+/**
+ * ffmpeg arguments that remux (or transcode when needed) one file to fragmented MP4 from `t` seconds on.
+ * Copied video can only start on a keyframe, so it starts a little before `t` and the audio must start at that same moment:
+ * trimming the audio to start at `t` instead (aresample first_pts=0) leaves the sound running seconds ahead of the picture.
+ * The client asks /api/keyframe first and passes the keyframe's own time as `t`, so the two agree on where the stream starts.
+ */
+function compatArgs(url, info, { t = 0, delay = 0, maxH = 1080 } = {}) {
+  const copyVideo = copiesVideo(info);
   const copyAudio = info.audio === 'opus'; // Opus-in-MP4 decodes in every Chromium build, AAC needs proprietary codecs
   delay = Math.max(-10, Math.min(10, delay));
-  // Stream-copied video can only start on a keyframe; -noaccurate_seek keeps audio and video in step there.
   const seekFlags = copyVideo ? ['-noaccurate_seek'] : [];
   const inputs = delay
     ? [...seekFlags, '-ss', String(t), '-i', url, '-itsoffset', String(delay), ...seekFlags, '-ss', String(t), '-i', url]
@@ -272,10 +276,30 @@ async function compatStream(req, res, ref, t, delay = 0, maxH = 1080) {
   const aIn = delay ? 1 : 0;
   const big = info.height > 1080 || maxH <= 480;
   const vf = info.height > maxH || !info.height ? ['-vf', `scale=-2:'min(${maxH},ih)'`] : [];
-  const args = ['-v', 'error', '-nostats', '-progress', 'pipe:2', '-fflags', '+genpts', ...inputs, '-map', '0:v:0', '-map', `${aIn}:a:${info.audioIndex || 0}?`, '-sn',
+  return { copyVideo, args: ['-v', 'error', '-nostats', '-progress', 'pipe:2', '-fflags', '+genpts', ...inputs, '-map', '0:v:0', '-map', `${aIn}:a:${info.audioIndex || 0}?`, '-sn',
     ...(copyVideo ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', big ? 'ultrafast' : 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p', ...vf]),
-    ...(copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'libopus', '-b:a', '160k', '-ac', '2', '-strict', '-2', '-af', 'aresample=async=1:first_pts=0']),
-    '-avoid_negative_ts', 'make_zero', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1'];
+    ...(copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'libopus', '-b:a', '160k', '-ac', '2', '-strict', '-2', '-af', 'aresample=async=1']),
+    '-avoid_negative_ts', 'make_zero', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1'] };
+}
+
+/** Start time of the keyframe a copy-mode stream beginning at `t` would actually start on (null when it can't be found). */
+const keyframeCache = new Map();
+async function keyframeBefore(ref, t) {
+  const key = `${ref}|${Math.round(t * 10)}`;
+  if (keyframeCache.has(key)) return keyframeCache.get(key);
+  const url = await checkedUrl(ref);
+  const { stdout } = await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-read_intervals', `${t}%+#1`, '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', url]);
+  const k = parseFloat(String(stdout).split('\n')[0]);
+  const out = Number.isFinite(k) && k <= t + 0.05 && t - k < 60 ? k : null;
+  if (out != null) { keyframeCache.set(key, out); if (keyframeCache.size > 300) keyframeCache.delete(keyframeCache.keys().next().value); }
+  return out;
+}
+
+/** Remux (or transcode when needed) to fragmented MP4 so any stream plays in the app window. */
+async function compatStream(req, res, ref, t, delay = 0, maxH = 1080) {
+  const url = await checkedUrl(ref);
+  const info = await probe(ref);
+  const { copyVideo, args } = compatArgs(url, info, { t, delay, maxH });
   const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   const entry = health.track(`vod:${ref}`, { kind: 'vod', mode: copyVideo ? 'copy' : 'transcode' });
   health.watchFfmpeg(entry, ff);
@@ -466,6 +490,13 @@ function createServer(port) {
       const ref = q.get('ref');
       if (!/^[0-9a-f]{20}$/.test(ref || '')) throw new HttpError(400, 'bad ref');
       return probe(ref);
+    },
+    // Where a converted stream starting at t really starts (the keyframe at or before it), so the player can show the right time.
+    async 'GET /api/keyframe'(req, q) {
+      const ref = q.get('ref'), t = parseFloat(q.get('t'));
+      if (!/^[0-9a-f]{20}$/.test(ref || '') || !Number.isFinite(t) || t < 0) throw new HttpError(400, 'bad request');
+      if (!player.available().ffprobe) return { start: null };
+      return { start: await keyframeBefore(ref, t).catch(() => null) };
     },
     // Why won't this stream play? Re-resolves it from scratch and asks the provider for its first bytes.
     async 'GET /api/stream-check'(req, q) {
@@ -749,4 +780,4 @@ async function proxyStream(req, res, ref) {
   body.on('data', (c) => health.countIn(e, c.length)).on('error', () => res.destroy()).pipe(res);
 }
 
-module.exports = { createServer, newEpisodeCount };
+module.exports = { createServer, newEpisodeCount, compatArgs };

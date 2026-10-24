@@ -70,6 +70,7 @@ function PlaybackWatch(video, opts) {
   video.addEventListener('seeking', () => driftReset(o.settleMs));
   video.addEventListener('seeked', () => { driftReset(o.settleMs); setTimeout(driftCheck, o.settleMs + 1200); });   // every skip gets its own check, soon after it settles
   video.addEventListener('playing', () => driftReset(o.settleMs));
+  video.addEventListener('ratechange', () => driftReset(o.settleMs));          // fast playback through a lead-in isn't drift
 
   video.addEventListener('waiting', () => { if (video.currentTime > 0 && Date.now() - startedAt >= o.warmupMs) stalls.push(Date.now()); });
   timer = setInterval(() => { check(); driftCheck(); }, 2000);
