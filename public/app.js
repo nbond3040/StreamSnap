@@ -495,7 +495,7 @@ async function detail(type, id) {
   }
   function drawEps() {
     const season = Number(sSel.value);
-    epBox.replaceChildren(...episodes.filter((e) => e.season === season).map((e) => h('div', { class: 'ep' + (selected && e.vid === selected.vid ? ' on' : ''), onclick: () => pickEpisode(e) },
+    epBox.replaceChildren(...episodes.filter((e) => e.season === season).map((e) => h('div', { class: 'ep' + (selected && e.vid === selected.vid ? ' on' : ''), tabindex: 0, onclick: () => pickEpisode(e) },
       h('span', { class: 'n' }, e.episode), h('span', { class: 'nm' }, e.title), e.watched && h('span', { class: 'w' }, '✓'))));
   }
   if (!episodes.length) { view.replaceChildren(hero, h('div', { class: 'empty' }, 'No episodes listed for this series.')); return; }

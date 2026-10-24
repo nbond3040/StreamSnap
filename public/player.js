@@ -362,7 +362,7 @@ const Player = (() => {
     sel.replaceChildren(...seasons.map((n) => h('option', { value: n, selected: n === curSeason }, `Season ${n}`)));
     const draw = () => $('#pEpList').replaceChildren(...s.episodes.filter((e) => e.season === +sel.value).map((e) => {
       const here = e.vid === ctx.vid;
-      return h('div', { class: 'ep' + (here ? ' on' : ''), onclick: () => !here && playEpisode(e) },
+      return h('div', { class: 'ep' + (here ? ' on' : ''), tabindex: 0, onclick: () => !here && playEpisode(e) },
         h('span', { class: 'n' }, e.episode), h('span', { class: 'nm' }, e.title), e.watched && h('span', { class: 'w' }, '✓'));
     }));
     sel.onchange = draw; draw();
@@ -417,6 +417,8 @@ const Player = (() => {
     if (k === ' ' || k === 'k') { e.preventDefault(); toggle(); }
     else if (k === 'arrowright') seekTo(cur() + 10);
     else if (k === 'arrowleft') seekTo(cur() - 10);
+    else if (k === 'l') seekTo(cur() + 30);
+    else if (k === 'j') seekTo(cur() - 30);
     else if (k === 'arrowup') { e.preventDefault(); video.volume = Math.min(1, video.volume + 0.05); }
     else if (k === 'arrowdown') { e.preventDefault(); video.volume = Math.max(0, video.volume - 0.05); }
     else if (k === 'f') fullscreen();

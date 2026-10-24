@@ -513,3 +513,19 @@ button.iconbtn { background:none; border:0; padding:0; cursor:pointer; }
 
 .phead { display:flex; gap:18px; align-items:flex-start; margin:10px 0 14px; } .pphoto { width:92px; height:92px; border-radius:50%; object-fit:cover; flex:none; }
 .pbio { margin:8px 0 0; color:var(--fg2); max-width:80ch; line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+
+/* ---- controller ---- */
+body.gp-on { cursor:none; }
+body.gp-on :focus { outline:3px solid var(--accent2); outline-offset:3px; border-radius:10px; scroll-margin:96px 48px; }
+body.gp-on .card:focus { transform:scale(1.05); z-index:2; transition:transform .12s; }
+body.gp-on .dd-item:focus, body.gp-on .menu button:focus, body.gp-on .osk-key:focus { outline-offset:-3px; }
+#gpLegend { position:fixed; left:50%; bottom:18px; transform:translate(-50%, 20px); z-index:70; display:flex; gap:16px; padding:9px 18px; border-radius:999px; background:rgba(14,14,22,.92); border:1px solid var(--line); color:var(--fg2); font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; }
+#gpLegend.show { opacity:1; transform:translate(-50%, 0); } #gpLegend b { color:var(--fg); }
+.osk { position:fixed; left:50%; bottom:0; transform:translateX(-50%); z-index:90; width:min(980px, 100vw); background:var(--s1); border:1px solid var(--line); border-bottom:0; border-radius:18px 18px 0 0; padding:16px 18px 14px; box-shadow:0 -12px 50px #000b; }
+.osk-preview { display:flex; align-items:baseline; gap:14px; background:var(--s2); border:1px solid var(--line); border-radius:12px; padding:12px 16px; margin-bottom:12px; font-size:1.4rem; min-height:3.2rem; }
+.osk-label { color:var(--dim); font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; } .osk-text { flex:1; word-break:break-all; }
+.osk-caret { display:inline-block; width:2px; height:1.1em; background:var(--accent2); vertical-align:text-bottom; margin:0 1px; animation:recpulse 1s infinite; }
+.osk-rows { display:grid; gap:8px; } .osk-row { display:flex; gap:8px; }
+.osk-key { flex:1; min-width:0; padding:13px 0; font-size:1.2rem; border-radius:10px; border:1px solid var(--line); background:var(--s3); color:var(--fg); cursor:pointer; }
+.osk-key.on { background:var(--accent); border-color:var(--accent); color:#fff; } .osk-key.go { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
+.osk-hint { text-align:center; color:var(--dim); font-size:12px; margin-top:10px; }
