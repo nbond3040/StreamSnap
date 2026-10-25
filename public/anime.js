@@ -21,6 +21,39 @@ const Anime = (() => {
     }
   }
 
+  // ---------- seasons: Kitsu lists every season as its own title; a franchise is shown once, under its first entry ----------
+  const groups = new Map();      // id -> { root, isRoot, seasons, season, rootInfo } | null (stands alone)
+  const groupWaiting = new Set();
+  async function lookupGroups(ids) {
+    const need = [...new Set(ids)].filter((id) => /^kitsu:/.test(id) && !groups.has(id) && !groupWaiting.has(id));
+    need.forEach((id) => groupWaiting.add(id));
+    for (let i = 0; i < need.length; i += 16) {
+      const chunk = need.slice(i, i + 16);
+      let out = {};
+      try { out = await api('/anime/groups?ids=' + chunk.join(',')); } catch { /* shown as they are */ }
+      for (const id of chunk) { groupWaiting.delete(id); if (id in out) groups.set(id, out[id]); }
+      listeners.forEach((fn) => fn());
+    }
+  }
+  /** What a catalog entry is shown as: its franchise's first entry (once), otherwise itself. */
+  function shownAs(m) { const g = groups.get(m.id); return g && !g.isRoot ? g.rootInfo : m; }
+  const seasonsOf = (m) => { const g = groups.get(m.id) || [...groups.values()].find((x) => x && x.root === m.id); return g ? g.seasons : 0; };
+
+  const SUBTYPE = { movie: 'Film', ova: 'OVA', ona: 'ONA', special: 'Special', tv: 'TV', music: 'Music video' };
+  /** The Seasons section on a title's page: Season 1, 2, 3... as links (this one highlighted), and the films / OVAs / specials as related. */
+  function renderSeasons(box, fr) {
+    box.replaceChildren();
+    const seasons = (fr.members || []).filter((m) => m.season > 0), extras = (fr.members || []).filter((m) => !m.season);
+    if (seasons.length < 2 && !extras.length) return;
+    const link = (m, text) => h('a', { class: 'season' + (m.id === fr.current ? ' on' : ''), href: `#/detail/series/${m.id}`, title: m.name }, text, m.year && h('small', {}, m.year));
+    box.append(h('div', { class: 'panel seasons-panel' },
+      seasons.length > 1 && h('div', { class: 'seasons-row' }, h('h3', {}, 'Seasons'), h('div', { class: 'seasons-list' }, seasons.map((m) => link(m, `Season ${m.season}`)))),
+      extras.length > 0 && h('details', { class: 'alts', open: extras.some((m) => m.id === fr.current) },
+        h('summary', {}, `Related films, OVAs & specials (${extras.length})`),
+        h('div', { class: 'extras' }, extras.map((m) => h('a', { class: 'extra' + (m.id === fr.current ? ' on' : ''), href: `#/detail/series/${m.id}` },
+          h('span', {}, m.name), h('small', {}, [SUBTYPE[m.subtype] || m.subtype, m.year].filter(Boolean).join(' · ')))))))); 
+  }
+
   /** The SUB / DUB marks on a cover. A title with neither playable gets none. */
   function mark(cardEl, a) {
     cardEl.querySelector('.abadges')?.remove();
@@ -57,7 +90,7 @@ const Anime = (() => {
     let token = 0, autoPages = 0;
     const key = () => `${state.kind}|${state.genre}|${state.q}`;
     const entry = () => { if (!lists.has(key())) lists.set(key(), { items: [], skip: 0, done: false }); return lists.get(key()); };
-    const cardFor = new Map();   // id -> card element in the grid
+    const cardFor = new Map();   // id shown -> card element
 
     const passes = (id) => {
       if (state.audio === 'all') return true;
@@ -66,16 +99,33 @@ const Anime = (() => {
       return a === null ? true : !!a[state.audio];               // lookup failed: can't tell, so don't hide it
     };
 
+    /** The list as shown: seasons folded into their franchise's first entry, each shown once. */
+    function displayed() {
+      const seen = new Set(), out = [];
+      for (const m of entry().items) { const d = shownAs(m); if (!seen.has(d.id)) { seen.add(d.id); out.push(d); } }
+      return out;
+    }
+    function cardOf(d) {
+      let c = cardFor.get(d.id);
+      if (!c) { c = card(d); cardFor.set(d.id, c); }
+      const n = seasonsOf(d), sm = c.querySelector('.t small');
+      if (sm) sm.textContent = [d.releaseInfo || d.year, n > 1 ? `${n} seasons` : ''].filter(Boolean).join(' · ');
+      return c;
+    }
+
     function paint() {
-      const e = entry();
+      const e = entry(), list = displayed();
       let shown = 0, pending = 0;
-      for (const m of e.items) {
-        const el = cardFor.get(m.id); if (!el) continue;
-        if (info.has(m.id)) mark(el, info.get(m.id));
+      const els = [];
+      for (const d of list) {
+        const el = cardOf(d);
+        if (info.has(d.id)) mark(el, info.get(d.id));
         else if (state.audio !== 'all') pending++;
-        const ok = passes(m.id);
+        const ok = passes(d.id);
         el.hidden = !ok; if (ok) shown++;
+        els.push(el);
       }
+      if (els.length !== grid.children.length || els.some((el, i) => grid.children[i] !== el)) grid.replaceChildren(...els);
       more.hidden = e.done;
       status.textContent = pending ? `Checking which of these have a ${state.audio === 'dub' ? 'dub' : 'sub'}… (${pending})`
         : e.done ? (shown ? 'You’ve reached the end of the list.' : 'Nothing found.') : state.audio !== 'all' && shown < 8 && !e.done && autoPages >= 4 ? 'Few matches so far. Load more to keep looking.' : '';
@@ -95,14 +145,18 @@ const Anime = (() => {
         e.items.push(...items);
         e.done = !items.length || !!state.q;                     // a search is one page
         if (mine !== token) return;
-        for (const m of items) { const c = card(m); cardFor.set(m.id, c); grid.append(c); }
-        lookup(items.map((m) => m.id)).then(() => mine === token && paint());
+        paint();
+        refresh(items, mine);
       } catch (err) {
         if (mine === token) status.replaceChildren(retryBox(err, () => load(attempt + 1)));
         more.disabled = false; return;
       }
       more.disabled = false;
       if (mine === token) paint();
+    }
+    /** Look up seasons first (so a season shows as its franchise), then which of the shown titles are subbed / dubbed. */
+    function refresh(items, mine) {
+      lookupGroups(items.map((m) => m.id)).then(() => { if (mine !== token) return; paint(); return lookup(displayed().map((d) => d.id)); }).then(() => mine === token && paint());
     }
     const onInfo = () => { if (document.body.contains(grid)) paint(); else listeners.delete(onInfo); };
     listeners.add(onInfo);
@@ -112,10 +166,10 @@ const Anime = (() => {
       cardFor.clear();
       const e = entry();
       status.textContent = ''; more.disabled = false;
-      grid.replaceChildren(...e.items.map((m) => { const c = card(m); cardFor.set(m.id, c); return c; }));
+      grid.replaceChildren();
       paint();
       if (!e.items.length) load();
-      else lookup(e.items.map((m) => m.id)).then(() => paint());
+      else refresh(e.items, token);
       drawFilters();
     }
 
@@ -140,5 +194,5 @@ const Anime = (() => {
     show();
   }
 
-  return { discover, badges, pref, setPref, mark, info };
+  return { discover, badges, pref, setPref, mark, info, renderSeasons };
 })();

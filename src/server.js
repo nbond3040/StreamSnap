@@ -29,6 +29,7 @@ const people = require('./lib/people');
 const kitsu = require('./lib/kitsu');
 const animeaudio = require('./lib/animeaudio');
 const anime = require('./lib/anime');
+const franchise = require('./lib/franchise');
 const TITLE_ID = /^(tt\d+|kitsu:\d+)$/;                          // a movie, show or anime: IMDb or Kitsu id
 const EPISODE_ID = /^(tt\d+(:\d+:\d+)?|kitsu:\d+(:\d+)?)$/;   // ...or one of its episodes
 const langName = (tag) => { const k = String(tag || '').toLowerCase(); return (Object.values(LANGS).find((l) => l.iso3 === k) || LANGS[k] || {}).name || ''; };
@@ -620,6 +621,31 @@ function createServer(port) {
       const kind = ['trending', 'popular', 'airing', 'rating'].includes(q.get('kind')) ? q.get('kind') : 'trending';
       try { return await kitsu.catalog({ kind, genre: q.get('genre') || '', q: (q.get('q') || '').slice(0, 80), skip: q.get('skip') || 0 }); }
       catch (e) { throw new HttpError(502, e.message); }
+    },
+    // Seasons of one show are separate entries in Kitsu. For each id: the franchise's first entry and how many seasons it has, so the
+    // list can show it once; null when the title stands alone. Ids Kitsu couldn't be asked about are left out (shown as they are).
+    async 'GET /api/anime/groups'(req, q) {
+      const ids = [...new Set((q.get('ids') || '').split(',').filter((x) => /^kitsu:\d+$/.test(x)))].slice(0, 40);
+      const out = {};
+      let i = 0;
+      await Promise.all(Array.from({ length: 4 }, async () => {
+        while (i < ids.length) {
+          const id = ids[i++], g = await franchise.groupOf(id);
+          if (g === undefined) continue;
+          if (g === null) { out[id] = null; continue; }
+          const rootInfo = g.members.find((m) => m.id === g.root) || {};
+          out[id] = { root: g.root, isRoot: g.root === id, seasons: g.seasons, season: (g.members.find((m) => m.id === id) || {}).season || 0,
+            rootInfo: { id: g.root, type: 'series', anime: true, name: rootInfo.name || g.root, poster: rootInfo.poster || '', releaseInfo: rootInfo.year || '' } };
+        }
+      }));
+      return out;
+    },
+    // The whole franchise for a title's page: seasons in order, then films and specials.
+    async 'GET /api/anime/franchise'(req, q) {
+      const id = q.get('id');
+      if (!/^kitsu:\d+$/.test(id || '')) throw new HttpError(400, 'bad id');
+      const g = await franchise.groupOf(id);
+      return g ? { ...g, current: id } : { root: id, members: [], seasons: 0, current: id };
     },
     // Which of these titles can be watched subbed / dubbed (looked up from the releases that exist; remembered for a day).
     async 'GET /api/anime/audio'(req, q) {

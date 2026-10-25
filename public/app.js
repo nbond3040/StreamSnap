@@ -350,7 +350,7 @@ function dlButton(ctx, s) {
 
 function renderStreams(box, ctx, cfg) {
   const hid = ctx.hidden;
-  const note = `${ctx.total} found · ${ctx.language} audio only` + (hid.language ? ` · ${hid.language} other-language hidden` : '') + (hid.uncached ? ` · ${hid.uncached} uncached hidden` : '') + (hid.audio ? ` · ${hid.audio} with no ${ctx.language} audio track hidden` : '');
+  const note = ctx.anime ? `${ctx.total} found · ${ctx.anime.kind === 'dub' ? 'dubbed' : 'subbed'}${ctx.anime.fallback ? ` (no ${ctx.anime.wanted === 'dub' ? 'dub' : 'sub'} found for this episode)` : ''}` : `${ctx.total} found · ${ctx.language} audio only` + (hid.language ? ` · ${hid.language} other-language hidden` : '') + (hid.uncached ? ` · ${hid.uncached} uncached hidden` : '') + (hid.audio ? ` · ${hid.audio} with no ${ctx.language} audio track hidden` : '');
   if (!ctx.picks.length) {
     box.replaceChildren(h('div', { class: 'panel' }, h('h3', {}, 'Streams'), h('div', { class: 'empty' }, `No ${ctx.language} streams cached on Real-Debrid for this title.`), h('p', { class: 'subtle' }, note)));
     return;
@@ -437,6 +437,8 @@ async function detail(type, id) {
   if (meta.anime && meta.type) type = meta.type;   // a Kitsu title knows whether it is a film or a series
   const base = { id, type, name: meta.name, poster: meta.poster, genres: meta.genres || [] };
   const streamsBox = h('div');
+  const seasonsBox = h('div');   // anime: the other seasons and related films, filled in when the franchise is known
+  if (/^kitsu:/.test(id)) api('/anime/franchise?id=' + id).then((fr) => Anime.renderSeasons(seasonsBox, fr)).catch(() => {});
   const playBtn = h('button', { class: 'btn', disabled: true }, 'Finding streams…');
   const libBtn = h('button', { class: 'btn ghost' }, meta.inLibrary ? '✓ In library' : '+ Library');
   libBtn.onclick = async () => { const r = await api('/library', base); r.inLibrary ? libraryIds.add(id) : libraryIds.delete(id); libBtn.textContent = r.inLibrary ? '✓ In library' : '+ Library'; };
@@ -475,7 +477,7 @@ async function detail(type, id) {
 
   if (type === 'movie') {
     const collBox = h('div');
-    view.replaceChildren(hero, h('div', { style: 'margin-top:24px' }, streamsBox), collBox);
+    view.replaceChildren(hero, seasonsBox, h('div', { style: 'margin-top:24px' }, streamsBox), collBox);
     loadCollection(collBox, id);
     streamsBox.replaceChildren(h('div', { class: 'panel' }, h('div', { class: 'skel', style: 'aspect-ratio:auto;height:90px;flex:none' })));
     buildContext(base, id, null).then(ready, fail);
@@ -504,7 +506,8 @@ async function detail(type, id) {
   }
   if (!episodes.length) { view.replaceChildren(hero, h('div', { class: 'empty' }, 'No episodes listed for this series.')); return; }
   sSel.value = start.season;
-  view.replaceChildren(hero, h('div', { class: 'dlayout' },
+  if (/^kitsu:/.test(id) && seasons.length < 2) sSel.hidden = true;   // an anime entry is a single season; the others are on the Seasons row above
+  view.replaceChildren(hero, seasonsBox, h('div', { class: 'dlayout' },
     h('div', { class: 'panel' }, h('h3', {}, 'Episodes', sSel), epBox), streamsBox));
   pickEpisode(start);
   epBox.querySelector('.on')?.scrollIntoView({ block: 'center' });

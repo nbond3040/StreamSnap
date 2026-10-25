@@ -31,6 +31,17 @@ http.createServer((req, res) => {
   const u = new URL(req.url, self);
   let m;
   if (/^\/catalog\/movie\/.*boom/.test(u.pathname)) { res.writeHead(504); return res.end(); } // simulate a Cinemeta gateway timeout
+  // ---- Kitsu API stand-in: kitsu:1 -> 2 -> 3 are seasons of one show, 6 is its film; 4 and 5 stand alone ----
+  { const FR = { 1: { name: 'Mock Anime', subtype: 'TV', date: '2020-04-01', eps: 12 }, 2: { name: 'Mock Anime 2nd Season', subtype: 'TV', date: '2021-04-01', eps: 12 }, 3: { name: 'Mock Anime 3rd Season', subtype: 'TV', date: '2022-04-01', eps: 12 },
+      4: { name: 'Mock Anime 4', subtype: 'TV', date: '2023-01-01', eps: 12 }, 5: { name: 'Mock Anime 5', subtype: 'TV', date: '2024-01-01', eps: 12 }, 6: { name: 'Mock Anime The Film', subtype: 'movie', date: '2025-01-01', eps: 1 } };
+    const REL = { 1: [['sequel', 2], ['side_story', 6]], 2: [['prequel', 1], ['sequel', 3]], 3: [['prequel', 2], ['sequel', 6]], 6: [['prequel', 3]] };
+    const res = (n) => ({ id: String(n), type: 'anime', attributes: { canonicalTitle: FR[n].name, subtype: FR[n].subtype, startDate: FR[n].date, episodeCount: FR[n].eps, posterImage: { small: `http://poster.example/${n}.jpg` } } });
+    if ((m = /^\/anime\/(\d+)\/media-relationships$/.exec(u.pathname))) {
+      const rel = REL[+m[1]] || [];
+      return json({ data: rel.map(([role, to], i) => ({ id: `${m[1]}${i}`, type: 'mediaRelationships', attributes: { role }, relationships: { destination: { data: { type: 'anime', id: String(to) } } } })), included: rel.map(([, to]) => res(to)) });
+    }
+    if ((m = /^\/anime\/(\d+)$/.exec(u.pathname)) && FR[+m[1]]) return json({ data: res(+m[1]) });
+  }
   // ---- Kitsu addon + Torrentio anime stand-in ----
   if (u.pathname === '/manifest.json') return json({ id: 'mock.kitsu', catalogs: [{ type: 'anime', id: 'kitsu-anime-trending' }, { type: 'anime', id: 'kitsu-anime-popular' }, { type: 'anime', id: 'kitsu-anime-airing' }, { type: 'anime', id: 'kitsu-anime-rating' }, { type: 'anime', id: 'kitsu-anime-list', extra: [{ name: 'search' }, { name: 'genre' }, { name: 'skip' }] }] });
   if ((m = /^\/catalog\/anime\/([\w-]+)(?:\/(.*))?\.json$/.exec(u.pathname))) {

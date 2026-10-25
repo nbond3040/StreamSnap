@@ -18,7 +18,7 @@ test('anime: catalog, dub/sub availability, per-kind stream picks, audio-track c
   t.after(() => mock.kill());
   await new Promise((r) => setTimeout(r, 700));
   process.env.STREAMSNAP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-anime-home-'));
-  for (const k of ['KITSU', 'TORRENTIO', 'CINEMETA']) process.env[`STREAMSNAP_${k}_URL`] = 'http://127.0.0.1:7961';
+  for (const k of ['KITSU', 'KITSU_API', 'TORRENTIO', 'CINEMETA']) process.env[`STREAMSNAP_${k}_URL`] = 'http://127.0.0.1:7961';
   const { createServer } = require('../src/server');
   const app = createServer(7962);
   await new Promise((r) => app.listen(7962, '127.0.0.1', r));
@@ -38,6 +38,18 @@ test('anime: catalog, dub/sub availability, per-kind stream picks, audio-track c
   // which titles have a sub and/or a dub
   const audio = await get('/api/anime/audio?ids=kitsu:1,kitsu:2,kitsu:3,kitsu:4,kitsu:5,kitsu:6');
   assert.deepEqual(audio, { 'kitsu:1': { sub: true, dub: true }, 'kitsu:2': { sub: true, dub: false }, 'kitsu:3': { sub: false, dub: true }, 'kitsu:4': { sub: false, dub: false }, 'kitsu:5': { sub: true, dub: true }, 'kitsu:6': { sub: true, dub: true } });
+
+  // seasons are one franchise: 1 -> 2 -> 3 (+ the film); 4 and 5 stand alone
+  const groups = await get('/api/anime/groups?ids=kitsu:1,kitsu:2,kitsu:3,kitsu:4,kitsu:6');
+  assert.deepEqual(['kitsu:1', 'kitsu:2', 'kitsu:3', 'kitsu:6'].map((id) => groups[id].root), ['kitsu:1', 'kitsu:1', 'kitsu:1', 'kitsu:1']);
+  assert.equal(groups['kitsu:4'], null);
+  assert.equal(groups['kitsu:2'].seasons, 3); assert.equal(groups['kitsu:2'].season, 2); assert.equal(groups['kitsu:2'].isRoot, false);
+  assert.equal(groups['kitsu:1'].isRoot, true); assert.equal(groups['kitsu:3'].season, 3); assert.equal(groups['kitsu:6'].season, 0);
+  assert.equal(groups['kitsu:3'].rootInfo.name, 'Mock Anime');
+  const fr = await get('/api/anime/franchise?id=kitsu:3');
+  assert.deepEqual(fr.members.map((m) => [m.id, m.season]), [['kitsu:1', 1], ['kitsu:2', 2], ['kitsu:3', 3], ['kitsu:6', 0]]);   // the film is related, not a season
+  assert.equal(fr.current, 'kitsu:3');
+  assert.deepEqual((await get('/api/anime/franchise?id=kitsu:5')).members, []);
 
   // meta
   const m1 = await get('/api/meta?type=series&id=kitsu:1');

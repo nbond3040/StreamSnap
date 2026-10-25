@@ -538,3 +538,13 @@ body.gp-on .dd-item:focus, body.gp-on .menu button:focus, body.gp-on .osk-key:fo
 .anime-filters input[type=search] { background:var(--s2); border:1px solid var(--line); border-radius:999px; padding:9px 16px; min-width:200px; color:var(--fg); outline:0; } .anime-filters input[type=search]:focus { border-color:var(--accent); }
 .anime-sort { margin-top:-4px; }
 #pAudio { font-weight:800; letter-spacing:.05em; font-size:13px; padding:6px 12px; border:1px solid currentColor; border-radius:8px; } #pAudio.dub { color:#ff9a4d; } #pAudio.sub { color:#6aa5ff; }
+
+.seasons-panel { margin-top:18px; display:grid; gap:14px; }
+.seasons-row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; } .seasons-row h3 { margin:0; }
+.seasons-list { display:flex; gap:8px; flex-wrap:wrap; }
+a.season { display:flex; flex-direction:column; align-items:center; padding:8px 18px; border-radius:12px; background:var(--s2); border:1px solid var(--line); color:var(--fg2); text-decoration:none; font-weight:600; }
+a.season small { color:var(--dim); font-weight:400; font-size:11px; } a.season:hover { border-color:var(--accent); color:var(--fg); }
+a.season.on { background:var(--accent); border-color:var(--accent); color:#fff; } a.season.on small { color:#ffffffcc; }
+.extras { display:grid; gap:4px; margin-top:8px; }
+a.extra { display:flex; justify-content:space-between; gap:12px; padding:8px 12px; border-radius:8px; color:var(--fg2); text-decoration:none; } a.extra:hover { background:var(--s2); color:var(--fg); }
+a.extra.on { background:var(--s3); color:var(--fg); } a.extra small { color:var(--dim); white-space:nowrap; }
