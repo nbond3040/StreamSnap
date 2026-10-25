@@ -5,6 +5,7 @@ const Player = (() => {
   const $ = (s) => document.querySelector(s);
   const root = $('#player'), video = $('#video'), seek = $('#pSeek');
   let ctx, pick, stream, mode, offset = 0, duration = 0, info = {}, fellBack = false;
+  let embedded = [];   // subtitle tracks inside the current file (anime releases carry theirs there)
   let maxH = 1080;   // ceiling for converted (re-encoded) playback; steps down if this computer can't keep up
   let segs = {}, learned = { intro: null, creditsFromEnd: null }, creditsDetectedAt = null, darkRun = 0;
   let audioDelay = Number(localStorage.getItem('ss.audioDelay') || 0), lastSave = 0, nextPromise = null, subTracks = [], activeSub = -1, idleTimer, token = 0;
@@ -27,7 +28,8 @@ const Player = (() => {
     $('#pTitle').textContent = ctx.title;
     $('#pSub').textContent = ctx.subtitleLine || '';
     root.hidden = false; document.body.style.overflow = 'hidden';
-    buildSubs(); buildMenus();
+    embedded = []; buildSubs(); buildMenus();
+    $('#pAudio').hidden = !ctx.anime; updateAudioBtn();
     $('#pEps').hidden = !ctx.series;
     $('#pExt').hidden = !(window.APPINFO && (APPINFO.players.mpv || APPINFO.players.vlc));
     if (!ctx.series) closeSide(); else if (!$('#pSide').hidden) renderSide();
@@ -41,8 +43,9 @@ const Player = (() => {
     watch.reset(false);
     stream = s; fellBack = false;
     status('spin', 'Loading ' + resLabel(s.resolution) + '…');
-    info = await api('/probe?ref=' + s.ref).catch(() => ({ mode: 'direct' }));
+    info = await api('/probe?ref=' + s.ref + alParam()).catch(() => ({ mode: 'direct' }));
     if (my !== token) return;
+    adoptEmbeddedSubs(s);
     duration = info.duration || 0;
     segs = info.segments || {};
     mode = info.mode === 'compat' || (audioDelay !== 0 && info.ffmpeg) ? 'compat' : 'direct';
@@ -71,7 +74,7 @@ const Player = (() => {
       }
       offset = start;
       if (play && at - start > 0.7 && at - start < 30) { pendingSeek = at - start; video.defaultPlaybackRate = 8; watchLeadIn(); }
-      video.src = `/api/compat/${stream.ref}?t=${start}&a=${audioDelay / 1000}` + (maxH < 1080 ? `&q=${maxH}` : '');
+      video.src = `/api/compat/${stream.ref}?t=${start}&a=${audioDelay / 1000}${alParam()}` + (maxH < 1080 ? `&q=${maxH}` : '');
     } else {
       offset = 0; video.src = `/api/stream/${stream.ref}`;
       video.addEventListener('loadedmetadata', () => { if (at) video.currentTime = at; }, { once: true });
@@ -305,14 +308,58 @@ const Player = (() => {
     }
     return cues;
   }
+  const allSubs = () => [...ctx.subs, ...embedded];
+  /** Subtitles inside the file (anime). Sub-mode anime turns on the full-dialogue track in the viewer's language by itself, since the audio isn't. */
+  function adoptEmbeddedSubs(s) {
+    const keep = activeSub >= 0 && subTracks[activeSub] ? subTracks[activeSub].sub.label : null;
+    embedded = (info.subTracks || []).map((t) => ({ label: `${t.title || t.langName || t.lang || 'Subtitles'} (in the file)`, lang: t.lang || '', url: `/api/embsub/${s.ref}/${t.n}.vtt`, native: !!t.native, forced: !!t.forced, def: !!t.default, title: t.title || '' }));
+    activeSub = -1; buildSubs();
+    const same = keep ? allSubs().findIndex((x) => x.label === keep) : -1;
+    if (same >= 0) { setSub(same); return; }
+    if (ctx.anime && ctx.anime.kind === 'sub' && embedded.length) {
+      const own = embedded.map((e, i) => ({ e, i })).filter((x) => x.e.native);
+      const best = own.find((x) => x.e.def && !x.e.forced && !/sign|song/i.test(x.e.title)) || own.find((x) => !x.e.forced && !/sign|song/i.test(x.e.title)) || own[0];
+      if (best) setSub(ctx.subs.length + best.i);
+    }
+  }
+  const alParam = () => (ctx && ctx.anime && ctx.anime.audioLang[ctx.anime.kind] ? `&al=${ctx.anime.audioLang[ctx.anime.kind]}` : '');
+  function updateAudioBtn() {
+    const b = $('#pAudio'); if (!ctx || !ctx.anime) return;
+    const k = ctx.anime.kind;
+    $('#pAudioLabel').textContent = k === 'dub' ? 'DUB' : 'SUB';
+    b.classList.toggle('dub', k === 'dub'); b.classList.toggle('sub', k !== 'dub');
+    const other = k === 'sub' ? 'dubbed' : 'subbed';
+    b.title = ctx.anime.available[k === 'sub' ? 'dub' : 'sub'] ? `Switch to ${other} (A)` : `No ${other} version of this episode`;
+    b.style.opacity = ctx.anime.available[k === 'sub' ? 'dub' : 'sub'] ? '' : '.5';
+  }
+  /** Subbed <-> dubbed for the same episode, at the same quality and the same moment. */
+  async function switchAudio() {
+    if (!ctx || !ctx.anime) return;
+    const from = ctx.anime.kind, to = from === 'sub' ? 'dub' : 'sub';
+    if (!ctx.anime.available[to]) return toast(`No ${to === 'dub' ? 'dubbed' : 'subbed'} version of this episode`);
+    const picks = ctx.anime.variants[to];
+    const res = pick ? pick.resolution : null;
+    const order = ['2160p', '1440p', '1080p', '720p', '576p', '480p', '360p'];
+    const near = picks.find((p) => p.resolution === res) || [...picks].sort((a, b) => Math.abs(order.indexOf(a.resolution) - order.indexOf(res)) - Math.abs(order.indexOf(b.resolution) - order.indexOf(res)))[0];
+    if (!near) return;
+    ctx.anime.kind = to; ctx.picks = picks; pick = near;
+    activeSub = -1;   // dubbed: captions off again; subbed: the file's own are turned on once it loads
+    Anime.setPref(to);
+    const t = cur(), wasPaused = video.paused;
+    buildMenus(); updateAudioBtn();
+    toast(to === 'dub' ? 'Switched to dubbed' : 'Switched to subbed (Japanese audio)');
+    await load(near.stream, t, !wasPaused);
+    if (wasPaused) video.pause();
+  }
+  $('#pAudio').onclick = switchAudio;
   function buildSubs() {
     for (const t of subTracks) { t.track.mode = 'disabled'; }
-    subTracks = ctx.subs.map((s) => ({ sub: s, track: video.addTextTrack('subtitles', s.label, s.lang), cues: null }));
+    subTracks = allSubs().map((s) => ({ sub: s, track: video.addTextTrack('subtitles', s.label, s.lang), cues: null }));
     const m = $('#pCCMenu');
     m.replaceChildren(h('div', { class: 'mh' }, 'Captions'),
       h('button', { class: 'on', 'data-i': -1, onclick: () => setSub(-1) }, 'Off'),
-      ...ctx.subs.map((s, i) => h('button', { 'data-i': i, onclick: () => setSub(i) }, s.label)));
-    if (!ctx.subs.length) m.append(h('div', { class: 'mh' }, 'No captions found'));
+      ...allSubs().map((s, i) => h('button', { 'data-i': i, onclick: () => setSub(i) }, s.label)));
+    if (!allSubs().length) m.append(h('div', { class: 'mh' }, 'No captions found'));
     $('#pCC').classList.remove('on');
   }
   async function setSub(i) {
@@ -323,7 +370,12 @@ const Player = (() => {
     $('#pCC').classList.toggle('on', i >= 0);
     const t = subTracks[i];
     if (t && !t.cues) {
-      try { t.cues = parseVtt(await (await fetch(`/api/sub/${t.sub.ref}.vtt`)).text()); } catch { t.cues = []; toast('Couldn’t load captions'); }
+      if (t.sub.url) toast('Reading the subtitles from the file…');
+      try {
+        const r = await fetch(t.sub.url || `/api/sub/${t.sub.ref}.vtt`);
+        if (!r.ok) throw new Error('subtitle request failed');
+        t.cues = parseVtt(await r.text());
+      } catch { t.cues = []; toast('Couldn’t load captions'); }
       shiftCues();
     }
   }
@@ -342,7 +394,7 @@ const Player = (() => {
     document.querySelectorAll('.menu').forEach((x) => (x.hidden = true));
     m.hidden = !show;
   }
-  function cycleCaptions() { if (ctx.subs.length) setSub(activeSub >= 0 ? -1 : 0); else toast('No captions found'); }
+  function cycleCaptions() { if (allSubs().length) setSub(activeSub >= 0 ? -1 : 0); else toast('No captions found'); }
 
   // ---------- next episode + episode sidebar ----------
   const nextAt = () => Skip.nextAt({ segments: segs, detectedAt: creditsDetectedAt, creditsFromEnd: learned.creditsFromEnd, duration: total() });
@@ -468,6 +520,7 @@ const Player = (() => {
     else if (k === 'f') fullscreen();
     else if (k === 'm') video.muted = !video.muted;
     else if (k === 'c') cycleCaptions();
+    else if (k === 'a' && ctx.anime) switchAudio();
     else if (k === 'y') { toast('Re-syncing picture and sound…'); load(stream, cur(), !video.paused); }
     else if (k === 'e' && ctx.series) $('#pSide').hidden ? openSide() : closeSide();
     else if (k === 'escape') { if (!document.fullscreenElement) close(); }

@@ -31,6 +31,25 @@ http.createServer((req, res) => {
   const u = new URL(req.url, self);
   let m;
   if (/^\/catalog\/movie\/.*boom/.test(u.pathname)) { res.writeHead(504); return res.end(); } // simulate a Cinemeta gateway timeout
+  // ---- Kitsu addon + Torrentio anime stand-in ----
+  if (u.pathname === '/manifest.json') return json({ id: 'mock.kitsu', catalogs: [{ type: 'anime', id: 'kitsu-anime-trending' }, { type: 'anime', id: 'kitsu-anime-popular' }, { type: 'anime', id: 'kitsu-anime-airing' }, { type: 'anime', id: 'kitsu-anime-rating' }, { type: 'anime', id: 'kitsu-anime-list', extra: [{ name: 'search' }, { name: 'genre' }, { name: 'skip' }] }] });
+  if ((m = /^\/catalog\/anime\/([\w-]+)(?:\/(.*))?\.json$/.exec(u.pathname))) {
+    const extra = decodeURIComponent(m[2] || ''), skip = Number((/skip=(\d+)/.exec(extra) || [])[1] || 0), q = (/search=([^&]*)/.exec(extra) || [])[1];
+    const all = Array.from({ length: 6 }, (_, i) => ({ id: `kitsu:${i + 1}`, type: i === 5 ? 'movie' : 'series', name: `Mock Anime ${i + 1}`, poster: '', genres: i % 2 ? ['Action'] : ['Comedy'], releaseInfo: String(2020 + i), description: `Anime ${i + 1}.` }));
+    const list = (q ? all.filter((a) => a.name.toLowerCase().includes(decodeURIComponent(q).toLowerCase())) : all).slice(skip, skip + 40);
+    return json({ metas: m[1] === 'kitsu-anime-airing' ? list.slice(0, 3) : list });
+  }
+  if ((m = /^\/meta\/(anime|series)\/kitsu:(\d+)\.json$/.exec(u.pathname))) {
+    const n = +m[2], film = n === 6;
+    return json({ meta: { id: `kitsu:${n}`, type: film ? 'movie' : 'series', name: `Mock Anime ${n}`, poster: '', background: '', description: `Anime ${n}.`, genres: ['Action'], releaseInfo: String(2019 + n),
+      videos: film ? [{ id: `kitsu:${n}`, title: 'Film' }] : Array.from({ length: 4 }, (_, i) => ({ id: `kitsu:${n}:${i + 1}`, title: `Episode ${i + 1}`, season: 1, episode: i + 1, released: new Date(Date.now() + (i - 2) * 86400000).toISOString() })) } });
+  }
+  if ((m = /\/stream\/anime\/kitsu:(\d+)(?::\d+)?\.json$/.exec(u.pathname))) {
+    const n = +m[1], sub = (r) => stream(r, 'SubsPlease', 'anime.mkv'), dub = (r) => stream(r, 'English.Dub', 'anime.mkv'), dual = (r) => stream(r, 'Dual.Audio', 'anime.mkv');
+    const by = { 1: [sub('1080p'), sub('720p'), dub('1080p'), dub('720p')], 2: [sub('1080p'), sub('720p')], 3: [dub('1080p')], 4: [], 5: [dual('1080p'), dual('720p')], 6: [sub('1080p'), dub('1080p')] };
+    return json({ streams: by[n] || [] });
+  }
+  if (/\/stream\/(series|movie)\/kitsu:/.test(u.pathname)) return json({ streams: [] });   // the anime providers answer only to the "anime" type
   const who = /search=([^/.]+)/.exec(u.pathname);
   if (who && /^\/catalog\/(movie|series)\//.test(u.pathname) && /actor|director/i.test(decodeURIComponent(who[1]))) { // a person search: real credits plus a title that only shares the words
     const t = u.pathname.split('/')[2];

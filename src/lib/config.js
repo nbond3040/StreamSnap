@@ -35,6 +35,7 @@ const DEFAULTS = {
   resolutions: ['2160p', '1080p', '720p', '480p'],
   subtitles: true,
   calendarNba: true,           // show NBA games on the calendar
+  animeAudio: 'sub',           // anime: sub (Japanese audio + subtitles) | dub (dubbed audio)
   autoplayNext: true,          // start the next episode automatically when one ends
   downloadDir: '',             // where downloads and recordings are saved ('' = ~/Videos/StreamSnap)
   themeColor: 'violet',        // see COLORS in public/app.js

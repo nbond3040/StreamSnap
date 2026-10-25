@@ -529,3 +529,12 @@ body.gp-on .dd-item:focus, body.gp-on .menu button:focus, body.gp-on .osk-key:fo
 .osk-key { flex:1; min-width:0; padding:13px 0; font-size:1.2rem; border-radius:10px; border:1px solid var(--line); background:var(--s3); color:var(--fg); cursor:pointer; }
 .osk-key.on { background:var(--accent); border-color:var(--accent); color:#fff; } .osk-key.go { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
 .osk-hint { text-align:center; color:var(--dim); font-size:12px; margin-top:10px; }
+
+/* ---- anime ---- */
+.card[hidden] { display:none !important; }
+.abadges { position:absolute; right:8px; bottom:8px; display:flex; gap:4px; z-index:1; }
+.abadge { font-size:11px; font-weight:800; letter-spacing:.04em; padding:2px 6px; border-radius:5px; color:#fff; box-shadow:0 1px 4px #0008; }
+.abadge.sub { background:#2f6fd0; } .abadge.dub { background:#d2691e; }
+.anime-filters input[type=search] { background:var(--s2); border:1px solid var(--line); border-radius:999px; padding:9px 16px; min-width:200px; color:var(--fg); outline:0; } .anime-filters input[type=search]:focus { border-color:var(--accent); }
+.anime-sort { margin-top:-4px; }
+#pAudio { font-weight:800; letter-spacing:.05em; font-size:13px; padding:6px 12px; border:1px solid currentColor; border-radius:8px; } #pAudio.dub { color:#ff9a4d; } #pAudio.sub { color:#6aa5ff; }

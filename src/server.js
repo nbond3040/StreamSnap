@@ -26,6 +26,13 @@ const streamsByRef = new Map(); // ref -> parsed stream (so the browser never ha
 const offline = require('./lib/offline');
 const nba = require('./lib/nba');
 const people = require('./lib/people');
+const kitsu = require('./lib/kitsu');
+const animeaudio = require('./lib/animeaudio');
+const anime = require('./lib/anime');
+const TITLE_ID = /^(tt\d+|kitsu:\d+)$/;                          // a movie, show or anime: IMDb or Kitsu id
+const EPISODE_ID = /^(tt\d+(:\d+:\d+)?|kitsu:\d+(:\d+)?)$/;   // ...or one of its episodes
+const langName = (tag) => { const k = String(tag || '').toLowerCase(); return (Object.values(LANGS).find((l) => l.iso3 === k) || LANGS[k] || {}).name || ''; };
+const metaFor = (type, id) => (anime.isKitsuId(id) ? kitsu.meta(id) : cinemeta.meta(type, id));
 const personCache = new Map();   // name -> { at, out }
 const resolved = new Map();     // ref -> { url, at }
 
@@ -155,7 +162,7 @@ async function backfillGenres(data) {
   const missing = data.library.filter((m) => !Array.isArray(m.genres));
   if (!missing.length) return;
   await Promise.all(missing.map(async (m) => {
-    try { const meta = await cinemeta.meta(m.type, m.id); m.genres = (meta && meta.genres) || []; } catch { /* offline: try again next time */ }
+    try { const meta = await metaFor(m.type, m.id); m.genres = (meta && meta.genres) || []; } catch { /* offline: try again next time */ }
   }));
   if (missing.some((m) => Array.isArray(m.genres))) config.saveData(data);
 }
@@ -164,7 +171,7 @@ async function backfillGenres(data) {
 function continueList(data) {
   const items = new Map();
   const live = Object.entries(data.progress)
-    .filter(([, p]) => p.meta && /^tt\d+$/.test(p.meta.id) && p.pos > 10 && !(p.dur && p.pos / p.dur > 0.9))
+    .filter(([, p]) => p.meta && TITLE_ID.test(p.meta.id) && p.pos > 10 && !(p.dur && p.pos / p.dur > 0.9))
     .sort((a, b) => b[1].at - a[1].at);
   for (const [key, p] of live) if (!items.has(p.meta.id)) items.set(p.meta.id, { key, pos: p.pos, dur: p.dur, at: p.at, ...p.meta });
   for (const m of data.pinned || []) if (!items.has(m.id)) items.set(m.id, { key: null, pos: 0, dur: 0, ...m });
@@ -199,8 +206,11 @@ async function ffprobeInfo(url) {
     const j = JSON.parse(stdout);
     const v = (j.streams || []).find((x) => x.codec_type === 'video' && !x.disposition?.attached_pic);
     const audioTracks = (j.streams || []).filter((x) => x.codec_type === 'audio').map((x) => ({ codec: x.codec_name, lang: x.tags?.language || '' }));
+    const TEXT_SUBS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text']);
+    const subTracks = (j.streams || []).filter((x) => x.codec_type === 'subtitle').map((x, n) => ({ n, codec: x.codec_name, lang: x.tags?.language || '', title: x.tags?.title || '', forced: !!x.disposition?.forced, default: !!x.disposition?.default }))
+      .filter((t) => TEXT_SUBS.has(t.codec));
     const chapters = (j.chapters || []).map((c) => ({ start: parseFloat(c.start_time), end: parseFloat(c.end_time), title: c.tags?.title || '' }));
-    return { duration: parseFloat(j.format?.duration) || 0, video: v ? v.codec_name : '', height: v ? Number(v.height) || 0 : 0, audioTracks, eightBit: !v || !/10|12/.test(v.pix_fmt || ''), chapters };
+    return { duration: parseFloat(j.format?.duration) || 0, video: v ? v.codec_name : '', height: v ? Number(v.height) || 0 : 0, audioTracks, subTracks, eightBit: !v || !/10|12/.test(v.pix_fmt || ''), chapters };
   } catch { return null; }
 }
 
@@ -220,16 +230,16 @@ async function ffmpegInfo(url) {
 }
 
 /** Ask ffprobe what's inside the file so we know whether Chromium can play it directly. */
-async function probe(ref) {
+async function probe(ref, lang) {
   if (!probes.has(ref)) probes.set(ref, rawProbe(ref));
   const raw = await probes.get(ref);
   const cfg = config.loadConfig();
-  const idx = nativeAudioIndex(raw.audioTracks, cfg.nativeLanguage);
+  const idx = nativeAudioIndex(raw.audioTracks, lang || cfg.nativeLanguage);   // `lang`: anime asks for Japanese (sub) or the dub language
   const track = raw.audioTracks[idx] || null;
   const videoOk = !raw.video || (SAFE_VIDEO.has(raw.video) && (raw.video !== 'h264' || raw.eightBit));
   const audioOk = !track || SAFE_AUDIO.has(track.codec);
   const needsConvert = !videoOk || !audioOk || idx > 0;
-  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', copyVideo: copiesVideo(raw), mode: raw.ffmpeg && (needsConvert || (streamsByRef.get(ref) || {}).forceCompat) ? 'compat' : 'direct', segments: segments.fromChapters(raw.chapters, raw.duration) };
+  return { ...raw, audioIndex: idx, audio: track ? track.codec : '', copyVideo: copiesVideo(raw), subTracks: (raw.subTracks || []).map((t) => ({ ...t, native: tagMatches(cfg.nativeLanguage, t.lang), langName: langName(t.lang) })), mode: raw.ffmpeg && (needsConvert || (streamsByRef.get(ref) || {}).forceCompat) ? 'compat' : 'direct', segments: segments.fromChapters(raw.chapters, raw.duration) };
 }
 
 /** Index of the audio track in the user's language (first track if none is tagged). */
@@ -296,9 +306,9 @@ async function keyframeBefore(ref, t) {
 }
 
 /** Remux (or transcode when needed) to fragmented MP4 so any stream plays in the app window. */
-async function compatStream(req, res, ref, t, delay = 0, maxH = 1080) {
+async function compatStream(req, res, ref, t, delay = 0, maxH = 1080, lang) {
   const url = await checkedUrl(ref);
-  const info = await probe(ref);
+  const info = await probe(ref, lang);
   const { copyVideo, args } = compatArgs(url, info, { t, delay, maxH });
   const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   const entry = health.track(`vod:${ref}`, { kind: 'vod', mode: copyVideo ? 'copy' : 'transcode' });
@@ -316,6 +326,65 @@ function recordProgress(key, pos, dur, meta) {
   data.progress[key] = { ...prev, pos, dur, at: Date.now(), meta: meta || prev.meta };
   if (dur > 0 && pos / dur > 0.9) data.watched[key] = true;
   config.saveData(data);
+}
+
+// ---------- anime ----------
+/** Releases for a Kitsu id: Torrentio's anime providers, asked as "anime" first and as "series" if that has nothing. */
+async function animeStreamList(cfg, ids) {
+  let lastErr = null, asked = false;
+  for (const sid of ids) for (const t of ['anime', 'series']) {
+    try { const l = await torrentio.fetchStreams(cfg, t, sid); asked = true; if (l.length) return l; } catch (e) { lastErr = e; }
+  }
+  if (!asked && lastErr) throw lastErr;
+  return [];
+}
+
+/** The stream list for an anime episode or film, as picks for subbed and for dubbed viewing. */
+async function animeStreams(cfg, id, wanted) {
+  const t0 = Date.now();
+  const all = await animeStreamList(cfg, /^kitsu:\d+$/.test(id) ? [id, `${id}:1`] : [id]);
+  for (const s of all) streamsByRef.set(s.ref, s);
+  const by = {};
+  for (const kind of ['sub', 'dub']) {
+    const sel = selectStreams(anime.forKind(all, kind), cfg, { ...rankOpts('series'), ignoreLanguage: true });   // anime audio isn't about the native-language flag
+    by[kind] = { picks: kind === 'dub' ? await verifyAudio(sel.picks, cfg, sel.hidden) : sel.picks, hidden: sel.hidden };
+  }
+  const pub = (picks) => picks.map((p) => ({ resolution: p.resolution, stream: publicStream(p.stream), alternatives: p.alternatives.map(publicStream) }));
+  const want = wanted === 'dub' || wanted === 'sub' ? wanted : cfg.animeAudio === 'dub' ? 'dub' : 'sub';
+  const other = want === 'sub' ? 'dub' : 'sub';
+  const kind = by[want].picks.length || !by[other].picks.length ? want : other;
+  return {
+    timings: { totalMs: Date.now() - t0 }, languageFallback: false, total: all.length, hidden: by[kind].hidden, language: LANGS[cfg.nativeLanguage]?.name || cfg.nativeLanguage,
+    picks: pub(by[kind].picks),
+    anime: { kind, fallback: kind !== want, wanted: want, audioLang: { sub: 'ja', dub: cfg.nativeLanguage }, available: { sub: by.sub.picks.length > 0, dub: by.dub.picks.length > 0 }, variants: { sub: pub(by.sub.picks), dub: pub(by.dub.picks) } },
+  };
+}
+
+// Embedded text subtitles (anime releases carry theirs inside the file) extracted to WebVTT. It has to read the whole file, so it runs
+// once per file, in the background, and the result is kept.
+const embeddedSubs = new Map();   // "ref:n" -> Promise<string>
+function embeddedVtt(ref, n) {
+  const key = `${ref}:${n}`;
+  if (embeddedSubs.has(key)) return embeddedSubs.get(key);
+  const job = (async () => {
+    const url = await checkedUrl(ref);
+    return new Promise((resolve, reject) => {
+      const ff = spawn('ffmpeg', ['-v', 'error', '-nostdin', '-i', url, '-map', `0:s:${n}`, '-f', 'webvtt', 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      const chunks = []; let size = 0;
+      const timer = setTimeout(() => { ff.kill('SIGKILL'); reject(new Error('Extracting the subtitles took too long.')); }, 5 * 60 * 1000);
+      ff.stdout.on('data', (c) => { size += c.length; if (size > 25e6) ff.kill('SIGKILL'); else chunks.push(c); });
+      ff.on('error', (e) => { clearTimeout(timer); reject(e); });
+      ff.on('close', (code) => {
+        clearTimeout(timer);
+        const text = Buffer.concat(chunks).toString('utf8');
+        if (code === 0 && text.startsWith('WEBVTT')) resolve(text); else reject(new Error('Couldn’t read the subtitles in this file.'));
+      });
+    });
+  })();
+  embeddedSubs.set(key, job);
+  job.catch(() => embeddedSubs.delete(key));
+  while (embeddedSubs.size > 30) embeddedSubs.delete(embeddedSubs.keys().next().value);
+  return job;
 }
 
 let guarded = false;
@@ -341,7 +410,7 @@ function createServer(port) {
       return cinemeta.catalog(q.get('type'), { search: q.get('q') || '', genre: q.get('genre') || '', skip: q.get('skip') || 0 });
     },
     async 'GET /api/meta'(req, q) {
-      const meta = await cinemeta.meta(q.get('type'), q.get('id'));
+      const meta = await metaFor(q.get('type'), q.get('id'));
       if (!meta) throw new HttpError(404, 'Not found');
       const data = config.loadData();
       meta.inLibrary = data.library.some((m) => m.id === meta.imdb_id);
@@ -436,7 +505,8 @@ function createServer(port) {
     async 'GET /api/streams'(req, q) {
       const cfg = config.loadConfig();
       const type = q.get('type'), id = q.get('id');
-      if (!/^(movie|series)$/.test(type) || !/^tt\d+(:\d+:\d+)?$/.test(id || '')) throw new HttpError(400, 'bad type or id');
+      if (!/^(movie|series)$/.test(type) || !EPISODE_ID.test(id || '')) throw new HttpError(400, 'bad type or id');
+      if (anime.isKitsuId(id)) { try { return await animeStreams(cfg, id, q.get('audio')); } catch (e) { throw new HttpError(502, e.message); } }
       const t0 = Date.now();
       let all;
       try { all = await torrentio.fetchStreams(cfg, type, id); } catch (e) { throw new HttpError(502, e.message); }
@@ -471,7 +541,7 @@ function createServer(port) {
     },
     async 'POST /api/skips'(req) {
       const b = await readBody(req);
-      if (!/^tt\d+$/.test(b.id || '')) throw new HttpError(400, 'bad id');
+      if (!TITLE_ID.test(b.id || '')) throw new HttpError(400, 'bad id');
       const data = config.loadData(), e = (data.skips = data.skips || {})[b.id] = data.skips[b.id] || {};
       if (b.kind === 'intro' && b.start >= 0 && b.end - b.start >= 15 && b.end - b.start <= 300 && b.start < 900) {
         e.intro = { start: segments.blend(e.intro?.start, b.start), end: segments.blend(e.intro?.end, b.end) };
@@ -489,7 +559,8 @@ function createServer(port) {
     async 'GET /api/probe'(req, q) {
       const ref = q.get('ref');
       if (!/^[0-9a-f]{20}$/.test(ref || '')) throw new HttpError(400, 'bad ref');
-      return probe(ref);
+      const al = q.get('al');
+      return probe(ref, /^[a-z]{2,3}$/.test(al || '') ? al : undefined);
     },
     // Where a converted stream starting at t really starts (the keyframe at or before it), so the player can show the right time.
     async 'GET /api/keyframe'(req, q) {
@@ -540,7 +611,31 @@ function createServer(port) {
       for (const p of Object.values(data.progress)) if (p.meta && p.meta.type === 'series') ids.set(p.meta.id, p.meta);
       const out = {};
       await Promise.all([...ids.keys()].slice(0, 60).map(async (id) => {
-        try { const n = newEpisodeCount(data, id, await cinemeta.meta('series', id)); if (n) out[id] = n; } catch { /* offline: no badge */ }
+        try { const n = newEpisodeCount(data, id, await metaFor('series', id)); if (n) out[id] = n; } catch { /* offline: no badge */ }
+      }));
+      return out;
+    },
+    // ---- Anime (Kitsu catalog; Torrentio's anime providers for the files) ----
+    async 'GET /api/anime/catalog'(req, q) {
+      const kind = ['trending', 'popular', 'airing', 'rating'].includes(q.get('kind')) ? q.get('kind') : 'trending';
+      try { return await kitsu.catalog({ kind, genre: q.get('genre') || '', q: (q.get('q') || '').slice(0, 80), skip: q.get('skip') || 0 }); }
+      catch (e) { throw new HttpError(502, e.message); }
+    },
+    // Which of these titles can be watched subbed / dubbed (looked up from the releases that exist; remembered for a day).
+    async 'GET /api/anime/audio'(req, q) {
+      const ids = [...new Set((q.get('ids') || '').split(',').filter((x) => /^kitsu:\d+$/.test(x)))].slice(0, 30);
+      const cfg = config.loadConfig(), out = {};
+      let i = 0;
+      await Promise.all(Array.from({ length: 6 }, async () => {
+        while (i < ids.length) {
+          const id = ids[i++], hit = animeaudio.get(id);
+          if (hit) { out[id] = hit; continue; }
+          try {
+            const list = (await animeStreamList(cfg, [`${id}:1`, id])).filter((x) => x.cached || cfg.allowUncached);
+            const a = anime.availability(list);
+            animeaudio.set(id, a); out[id] = a;
+          } catch { out[id] = null; }           // couldn't look: leave it unmarked and try again next time
+        }
       }));
       return out;
     },
@@ -552,15 +647,15 @@ function createServer(port) {
       const cfg = config.loadConfig(), data = config.loadData();
       const series = new Map();
       for (const m of [...data.library, ...(data.pinned || [])]) if (m.type === 'series') series.set(m.id, m);
-      for (const p of Object.values(data.progress)) if (p.meta && p.meta.type === 'series' && /^tt\d+$/.test(p.meta.id) && !series.has(p.meta.id)) series.set(p.meta.id, p.meta);
+      for (const p of Object.values(data.progress)) if (p.meta && p.meta.type === 'series' && TITLE_ID.test(p.meta.id) && !series.has(p.meta.id)) series.set(p.meta.id, p.meta);
       const episodes = [];
       await Promise.all([...series.values()].slice(0, 80).map(async (m) => {
         try {
-          const meta = await cinemeta.meta('series', m.id);
+          const meta = await metaFor('series', m.id);
           for (const v of (meta && meta.videos) || []) {
             const day = typeof v.released === 'string' ? v.released.slice(0, 10) : '';
             if (!(v.season > 0) || day < from || day > to) continue;
-            episodes.push({ kind: 'ep', series: m.id, name: m.name || meta.name, poster: m.poster || meta.poster || '', season: v.season, episode: v.episode, title: v.name || v.title || `Episode ${v.episode}`, date: day, watched: !!data.watched[`series:${m.id}:${v.season}:${v.episode}`] });
+            episodes.push({ kind: 'ep', series: m.id, name: m.name || meta.name, poster: m.poster || meta.poster || '', season: v.season, episode: v.episode, title: v.name || v.title || `Episode ${v.episode}`, date: day, watched: !!data.watched[`series:${v.id}`] });
           }
         } catch { /* one series failing doesn't hide the rest */ }
       }));
@@ -639,7 +734,7 @@ function createServer(port) {
     // Idempotent add (the toggle above is for the details page); used by the "+" on cover art.
     async 'POST /api/library/add'(req) {
       const { id, type, name, poster, genres } = await readBody(req);
-      if (!/^tt\d+$/.test(id || '') || !/^(movie|series)$/.test(type)) throw new HttpError(400, 'bad title');
+      if (!TITLE_ID.test(id || '') || !/^(movie|series)$/.test(type)) throw new HttpError(400, 'bad title');
       const data = config.loadData();
       if (!data.library.some((m) => m.id === id)) {
         const clean = Array.isArray(genres) ? genres.filter((g) => typeof g === 'string').slice(0, 8) : [];
@@ -658,7 +753,7 @@ function createServer(port) {
     // "Continue watching" is derived from saved progress, so removing a title clears its progress entries.
     async 'POST /api/continue/add'(req) {
       const { id, type, name, poster } = await readBody(req);
-      if (!/^tt\d+$/.test(id || '') || !/^(movie|series)$/.test(type)) throw new HttpError(400, 'bad title');
+      if (!TITLE_ID.test(id || '') || !/^(movie|series)$/.test(type)) throw new HttpError(400, 'bad title');
       const data = config.loadData();
       data.pinned = (data.pinned || []).filter((m) => m.id !== id);
       data.pinned.unshift({ id, type, name: String(name || ''), poster: String(poster || ''), at: Date.now() });
@@ -675,7 +770,7 @@ function createServer(port) {
     },
     async 'POST /api/library'(req) {
       const { id, type, name, poster, genres } = await readBody(req);
-      if (!/^tt\d+$/.test(id || '')) throw new HttpError(400, 'bad id');
+      if (!TITLE_ID.test(id || '')) throw new HttpError(400, 'bad id');
       const data = config.loadData();
       const i = data.library.findIndex((m) => m.id === id);
       const clean = Array.isArray(genres) ? genres.filter((g) => typeof g === 'string').slice(0, 8) : [];
@@ -703,7 +798,12 @@ function createServer(port) {
         if (!cfg.xtreamUrl || !player.available().ffmpeg) throw new HttpError(400, player.available().ffmpeg ? 'Live TV isn\'t set up.' : 'Live TV needs ffmpeg (sudo dnf/apt install ffmpeg).');
         return await live.streamLive(res, xtream.clientFor(cfg).liveUrl(m[1]), m[1], parseInt(url.searchParams.get('a'), 10) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
       }
-      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return await compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080);
+      if ((m = /^\/api\/compat\/([0-9a-f]{20})$/.exec(url.pathname)) && req.method === 'GET') return await compatStream(req, res, m[1], parseFloat(url.searchParams.get('t')) || 0, parseFloat(url.searchParams.get('a')) || 0, [1080, 720, 480].includes(Number(url.searchParams.get('q'))) ? Number(url.searchParams.get('q')) : 1080, /^[a-z]{2,3}$/.test(url.searchParams.get('al') || '') ? url.searchParams.get('al') : undefined);
+      if ((m = /^\/api\/embsub\/([0-9a-f]{20})\/(\d{1,2})\.vtt$/.exec(url.pathname)) && req.method === 'GET') {
+        let vtt; try { vtt = await embeddedVtt(m[1], Number(m[2])); } catch (e) { throw new HttpError(502, e.message); }
+        res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(vtt);
+      }
       if ((m = /^\/api\/sub\/([0-9a-f]{20})\.vtt$/.exec(url.pathname)) && req.method === 'GET') {
         const vtt = await subtitles.fetchVtt(m[1]);
         res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8' });

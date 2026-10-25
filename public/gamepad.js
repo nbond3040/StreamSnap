@@ -251,6 +251,7 @@
     if (b === B.SQ) return key('c', document.body);
     if (b === B.OPT) return key('f', document.body);
     if (b === B.L3) return key('m', document.body);
+    if (b === B.R3) return key('a', document.body);
     if (b === B.CREATE) { click('#pQ'); return setTimeout(enterTrap, 80); }
     if (b === B.TRI || b === B.R2) { if (click('#pSkip') || click('#pNext')) return; if (b === B.TRI) { key('e', document.body); setTimeout(enterTrap, 80); } }
   }

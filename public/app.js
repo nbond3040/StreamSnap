@@ -67,11 +67,11 @@ function card(m, prog, onRemove, onOpen) {
   const id = m.id || m.imdb_id;
   const play = h('button', { class: 'playbtn', title: 'Play', 'aria-label': `Play ${m.name}`, onclick: (e) => { e.preventDefault(); e.stopPropagation(); (onOpen || quickPlay)(m); } });
   setIcon(play, 'play');
-  const c = h('a', { class: 'card', href: `#/detail/${m.type}/${id}`, 'data-tt': m.type === 'series' ? id : null },
+  const c = h('a', { class: 'card', href: `#/detail/${m.type}/${id}`, 'data-tt': m.type === 'series' ? id : null, 'data-anime': /^kitsu:/.test(id) ? id : null },
     h('div', { class: 'img', style: m.poster ? `background-image:url("${encodeURI(m.poster)}")` : '' },
       m.imdbRating && h('span', { class: 'rate' }, '★ ' + m.imdbRating), play),
     h('div', { class: 't' }, m.name, (m.releaseInfo || m.year || m.season) && h('small', {}, m.season ? `S${m.season} E${m.episode}` : m.releaseInfo || m.year)));
-  if (!onRemove && !libraryIds.has(id) && /^tt\d+$/.test(id)) {
+  if (!onRemove && !libraryIds.has(id) && /^(tt\d+|kitsu:\d+)$/.test(id)) {
     const a = h('button', { class: 'rm add', title: 'Add to library', 'aria-label': 'Add to library', onclick: async (e) => {
       e.preventDefault(); e.stopPropagation();
       try {
@@ -143,7 +143,7 @@ async function home() {
   };
   out.push(...row('Popular movies', moviesR, movies, 'movie'), ...row('Popular series', seriesR, series, 'series'));
   view.replaceChildren(...out);
-  applyBadges();
+  applyBadges(); Anime.badges(view);
 }
 
 // Discover remembers what has been loaded (per type and genre) and the genre you picked, so Back restores the same list.
@@ -193,7 +193,8 @@ async function discover(type) {
   }
   const seg = h('div', { class: 'seg' },
     h('button', { class: type === 'movie' ? 'on' : '', onclick: () => (location.hash = '#/discover/movie') }, 'Movies'),
-    h('button', { class: type === 'series' ? 'on' : '', onclick: () => (location.hash = '#/discover/series') }, 'Series'));
+    h('button', { class: type === 'series' ? 'on' : '', onclick: () => (location.hash = '#/discover/series') }, 'Series'),
+    h('button', { onclick: () => (location.hash = '#/discover/anime') }, 'Anime'));
   view.replaceChildren(h('div', { class: 'filters' }, seg, sel), grid, h('p', { style: 'text-align:center;margin-top:28px' }, more));
   show();
 }
@@ -253,7 +254,7 @@ async function libraryView() {
   }
   view.replaceChildren(h('h2', { class: 'sec' }, 'My library'), h('div', { class: 'filters' }, seg, sel), body);
   render();
-  applyBadges();
+  applyBadges(); Anime.badges(view);
 }
 
 // ---------- people ----------
@@ -304,14 +305,15 @@ async function personView(name, from) {
 /** Fetch streams + captions for one movie/episode and bundle everything the player needs. */
 async function buildContext(base, vid, ep, episodes) {
   const q = `type=${base.type}&id=${vid}`;
-  const [res, subs] = await Promise.all([api('/streams?' + q), api('/subtitles?' + q)]);
+  const isAnime = /^kitsu:/.test(vid);
+  const [res, subs] = await Promise.all([api('/streams?' + q + (isAnime && Anime.pref() ? `&audio=${Anime.pref()}` : '')), api('/subtitles?' + q).catch(() => [])]);
   const idx = ep ? episodes.findIndex((e) => e.vid === vid) : -1;
   const nxt = idx >= 0 ? episodes[idx + 1] : null;
-  const label = (e) => `S${e.season} E${e.episode} · ${e.title}`;
+  const label = (e) => (isAnime ? `Episode ${e.episode} · ${e.title}` : `S${e.season} E${e.episode} · ${e.title}`);
   return {
     type: base.type, vid, title: base.name, subtitleLine: ep ? label(ep) : '', key: `${base.type}:${vid}`,
     meta: { type: base.type, id: base.id, name: base.name, poster: base.poster, videoId: vid, season: ep?.season, episode: ep?.episode },
-    picks: res.picks, hidden: res.hidden, languageFallback: !!res.languageFallback, total: res.total, language: res.language, subs,
+    picks: res.picks, anime: res.anime || null, hidden: res.hidden, languageFallback: !!res.languageFallback, total: res.total, language: res.language, subs,
     series: ep ? { episodes, load: (e) => buildContext(base, e.vid, e, episodes) } : null,
     next: nxt ? { label: label(nxt), load: () => buildContext(base, nxt.vid, nxt, episodes) } : null,
   };
@@ -372,7 +374,7 @@ function buildEpisodes(meta, id) {
   const all = (meta.videos || []).filter((v) => v.season != null && v.episode != null);
   const regular = all.filter((v) => v.season > 0);
   return (regular.length ? regular : all)
-    .map((v) => ({ vid: `${id}:${v.season}:${v.episode}`, season: v.season, episode: v.episode, title: v.name || v.title || `Episode ${v.episode}`, watched: !!meta.watched[`series:${id}:${v.season}:${v.episode}`] }))
+    .map((v) => ({ vid: /^kitsu:/.test(id) ? `${id}:${v.episode}` : `${id}:${v.season}:${v.episode}`, season: v.season, episode: v.episode, title: v.name || v.title || `Episode ${v.episode}`, watched: !!meta.watched[/^kitsu:/.test(id) ? `series:${id}:${v.episode}` : `series:${id}:${v.season}:${v.episode}`] }))
     .sort((a, b) => a.season - b.season || a.episode - b.episode);
 }
 
@@ -394,13 +396,14 @@ async function resumeWatching(item) {
   try {
     const cfg = await api('/config');
     let ctx;
-    if (item.type === 'series') {
+    if (item.type === 'series' || /^kitsu:/.test(item.id)) {
       // Pinned series have no saved episode yet, so work out where to start from the watch history.
       const meta = await api(`/meta?type=series&id=${item.id}`);
+      if (meta.anime && meta.type === 'movie') { base.type = 'movie'; item = { ...item, type: 'movie' }; }
       const episodes = buildEpisodes(meta, item.id);
-      const ep = (item.videoId && episodes.find((e) => e.vid === item.videoId)) || startEpisode(meta, episodes);
-      if (!ep) throw new Error('No episodes listed for this series');
-      ctx = await buildContext(base, ep.vid, ep, episodes);
+      const ep = base.type === 'movie' ? null : (item.videoId && episodes.find((e) => e.vid === item.videoId)) || startEpisode(meta, episodes);
+      if (!ep && base.type !== 'movie') throw new Error('No episodes listed for this series');
+      ctx = ep ? await buildContext(base, ep.vid, ep, episodes) : await buildContext(base, item.id, null);
     } else ctx = await buildContext(base, item.id, null);
     if (!ctx.picks.length) { toast('No streams available right now'); location.hash = detailHash; return; }
     const saved = item.stream || (await api('/resume?key=' + encodeURIComponent(ctx.key)).catch(() => ({}))).stream || {};
@@ -431,6 +434,7 @@ async function loadCollection(box, id) {
 async function detail(type, id) {
   view.replaceChildren(h('div', { class: 'empty', style: 'margin-top:40px' }, 'Loading…'));
   const [meta, cfg] = await Promise.all([api(`/meta?type=${type}&id=${id}`), api('/config')]);
+  if (meta.anime && meta.type) type = meta.type;   // a Kitsu title knows whether it is a film or a series
   const base = { id, type, name: meta.name, poster: meta.poster, genres: meta.genres || [] };
   const streamsBox = h('div');
   const playBtn = h('button', { class: 'btn', disabled: true }, 'Finding streams…');
@@ -584,6 +588,7 @@ async function settings() {
       field('HDR / Dolby Vision', select('hdrPolicy', { allow: 'Allow', avoid: 'Avoid when an SDR option exists', only: 'HDR only' })),
       field('Downloads & recordings folder', text('downloadDir', 'text', '~/Videos/StreamSnap'), 'Absolute path. Leave blank for ~/Videos/StreamSnap.'),
       check('calendarNba', 'Show NBA games on the calendar', 'Schedule and live scores. Games can be watched through your Live TV provider.'),
+      field('Anime audio', select('animeAudio', { sub: 'Subbed: Japanese audio with subtitles', dub: 'Dubbed: audio in my language' }), 'What Play starts with for anime. You can switch while watching.'),
       check('autoplayNext', 'Autoplay next episode', 'When an episode ends, the next one starts after a short countdown. You can cancel it.'),
       check('subtitles', 'Fetch captions in my language', 'Captions are always off until you turn them on in the player.')),
     h('div', { class: 'card2' }, h('h2', {}, 'Playback'),
@@ -595,7 +600,7 @@ async function settings() {
     const body = { resolutions: cfg.resolutions };
     for (const el of f.elements) if (el.name) body[el.name] = el.type === 'checkbox' ? el.checked : el.value;
     if (!body.realDebridKey) body.keepKey = true;
-    try { await api('/config', body); toast('Settings saved'); } catch (err) { toast(err.message); }
+    try { await api('/config', body); Anime.setPref(''); toast('Settings saved'); } catch (err) { toast(err.message); }
   };
   view.replaceChildren(f);
 }
@@ -677,7 +682,7 @@ async function route() {
   document.querySelectorAll('#top [data-nav]').forEach((n) => n.classList.toggle('on', n.dataset.nav === (page || 'home')));
   try {
     if (!page) await home();
-    else if (page === 'discover') await discover(a === 'series' ? 'series' : 'movie');
+    else if (page === 'discover') await (a === 'anime' ? Anime.discover() : discover(a === 'series' ? 'series' : 'movie'));
     else if (page === 'search') await searchView(decodeURIComponent(a));
     else if (page === 'library') await libraryView();
     else if (page === 'live') await Live.view();
